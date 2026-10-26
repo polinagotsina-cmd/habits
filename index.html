@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#FFFFFF">
+  <meta name="color-scheme" content="light">
+
+  <!-- iOS home-screen app -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Habits">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.json">
+
+  <title>Habits</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500&display=swap">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <!-- Screen 1: Welcome (shown on every launch, tap to skip) -->
+  <div id="welcome" class="welcome" aria-hidden="true">
+    <h1 class="welcome__title">Welcome!</h1>
+  </div>
+
+  <!-- Screen 2: Habits -->
+  <main id="app" class="app">
+    <header class="app__header">
+      <div class="logo">Habits</div>
+    </header>
+
+    <section class="today" aria-labelledby="today-heading">
+      <h2 id="today-heading" class="section-title"></h2>
+      <ul id="today-list" class="habit-list"></ul>
+      <p id="all-done" class="all-done" hidden>All done 🎉</p>
+    </section>
+
+    <section class="week" aria-labelledby="week-heading">
+      <h2 id="week-heading" class="section-title">Current Week</h2>
+      <div id="week-grid" class="week-grid" role="grid"></div>
+      <p id="week-total" class="week-total" hidden></p>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

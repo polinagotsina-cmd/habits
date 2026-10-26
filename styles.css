@@ -1,0 +1,374 @@
+/* ==========================================================================
+   Habits — styles
+   Mockups are 390 × 844 @1x; sizes below are taken from them directly.
+   ========================================================================== */
+
+:root {
+  --yellow: #FFEAB1;
+  --text: #2D2D2D;
+  --empty: #EEEEEE;
+  --bg: #FFFFFF;
+
+  --font-serif: "Instrument Serif", "Times New Roman", serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+
+  --card-radius: 12px;
+  --cell: 18px;
+  --cell-gap-x: 6px;
+  --cell-gap-y: 5px;
+  --cell-radius: 4px;
+
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  /* App-like: no text selection / callouts except inside inputs */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+h1, h2, p, ul {
+  margin: 0;
+  padding: 0;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+/* ---------- Screen 1: Welcome ---------- */
+
+.welcome {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  transition: opacity 0.5s ease, visibility 0s linear 0.5s;
+}
+
+.welcome.is-hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.welcome__title {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  font-size: 48px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+/* ---------- Screen 2: Habits ---------- */
+
+.app {
+  position: relative;
+  padding:
+    var(--safe-top)
+    var(--safe-right)
+    calc(var(--safe-bottom) + 48px)
+    var(--safe-left);
+}
+
+.app__header {
+  height: 74px;
+}
+
+.logo {
+  position: absolute;
+  top: calc(var(--safe-top) + 13px);
+  left: calc(var(--safe-left) + 11px);
+  font-family: var(--font-serif);
+  font-size: 19px;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.section-title {
+  font-size: 24px;
+  font-weight: 500;
+  line-height: 29px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: -0.035em;
+}
+
+/* ---------- Today ---------- */
+
+.habit-list {
+  list-style: none;
+  width: min(339px, 100% - 32px);
+  margin: 11px auto 0;
+}
+
+.habit {
+  display: flex;
+  align-items: flex-start; /* checkbox lines up with the name, not the note */
+  gap: 10px;
+  min-height: 59px;
+  margin-bottom: 4px;
+  padding: 14px 24px 18px;
+  border-radius: var(--card-radius);
+  background: var(--yellow);
+  overflow: hidden;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  transition: transform 0.15s ease;
+}
+
+.habit.is-pressing {
+  transform: scale(0.98);
+}
+
+/* Fade out + height collapse after completion (height is set inline by JS) */
+.habit.is-collapsing {
+  opacity: 0;
+  min-height: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  transition:
+    opacity 0.3s ease,
+    height 0.35s ease 0.1s,
+    margin 0.35s ease 0.1s,
+    padding 0.35s ease 0.1s,
+    min-height 0.35s ease 0.1s;
+}
+
+.check {
+  position: relative;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin-top: 3px;
+  border: 2px solid var(--text);
+  border-radius: 50%;
+  transition: background-color 0.15s ease;
+}
+
+/* Bigger invisible hit area around the circle */
+.check::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+}
+
+.check svg {
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 0.15s ease, transform 0.2s ease;
+}
+
+.habit.is-done .check {
+  background: var(--text);
+}
+
+.habit.is-done .check svg {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.habit__body {
+  min-width: 0;
+  flex: 1;
+}
+
+.habit__name {
+  font-size: 23px;
+  font-weight: 500;
+  line-height: 26px;
+}
+
+.habit__note {
+  font-size: 12.5px;
+  line-height: 14px;
+  overflow-wrap: anywhere;
+}
+
+.habit__input {
+  display: block;
+  width: 100%;
+  margin-top: 2px;
+  padding: 2px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(45, 45, 45, 0.35);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px; /* >= 16px so iOS doesn't zoom */
+  line-height: 20px;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.habit__input::placeholder {
+  color: rgba(45, 45, 45, 0.45);
+}
+
+.all-done {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  margin-top: 11px;
+  font-size: 22px;
+  line-height: 26px;
+  text-align: center;
+  animation: fade-in 0.4s ease;
+}
+
+.all-done[hidden] {
+  display: none;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ---------- Current week ---------- */
+
+.week {
+  margin-top: 100px;
+}
+
+.week-grid {
+  display: grid;
+  grid-template-columns: 89px repeat(7, var(--cell)) 30px;
+  column-gap: var(--cell-gap-x);
+  row-gap: var(--cell-gap-y);
+  align-items: center;
+  justify-content: center;
+  margin-top: 20px;
+}
+
+.week-grid__label {
+  position: relative;
+  top: 1px;
+  font-size: 13px;
+  line-height: var(--cell);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell {
+  position: relative;
+  z-index: 1;
+  width: var(--cell);
+  height: var(--cell);
+  border-radius: var(--cell-radius);
+  background: var(--empty);
+  transition: background-color 0.2s ease;
+}
+
+.cell.is-done {
+  background: var(--yellow);
+}
+
+.cell:disabled {
+  cursor: default;
+}
+
+/* Expand the tap target without changing the visuals */
+.cell:not(:disabled)::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+}
+
+.week-grid__pct {
+  font-size: 8px;
+  line-height: 10px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.week-grid__pct--day {
+  margin-top: 9px;
+  text-align: center;
+  /* allow "100%" to overflow the 18px column symmetrically */
+  justify-self: center;
+}
+
+/* Outline around today's whole column */
+.today-outline {
+  grid-row: 1 / span 5;
+  align-self: stretch;
+  margin: -3px;
+  border: 1px solid var(--text);
+  border-radius: 6px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.week-total {
+  margin-top: 20px;
+  font-size: 13px;
+  line-height: 16px;
+  text-align: center;
+}
+
+.week-total[hidden] {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
