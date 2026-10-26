@@ -49,6 +49,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
   overflow-x: hidden;
+  overflow-anchor: none; /* don't let scroll anchoring fight the FLIP slides */
   /* App-like: no text selection / callouts except inside inputs */
   -webkit-user-select: none;
   user-select: none;
@@ -58,6 +59,14 @@ body {
 h1, h2, p, ul {
   margin: 0;
   padding: 0;
+}
+
+/* Inter tracking -4%. Set per element: an em value inherited from body would
+   be frozen at body's font size. Serif text (.logo, .welcome__title,
+   .all-done) overrides this further down. */
+.app,
+.app * {
+  letter-spacing: -0.04em;
 }
 
 button {
@@ -130,12 +139,16 @@ button {
   line-height: 29px;
   text-align: center;
   text-transform: uppercase;
-  letter-spacing: -0.035em;
 }
 
 /* ---------- Today ---------- */
 
+.today {
+  position: relative; /* anchors a fading-out "All done" */
+}
+
 .habit-list {
+  position: relative; /* anchors a fading-out card (see detach() in app.js) */
   list-style: none;
   width: min(339px, 100% - 32px);
   margin: 11px auto 0;
@@ -143,11 +156,11 @@ button {
 
 .habit {
   display: flex;
-  align-items: flex-start; /* checkbox lines up with the name, not the note */
-  gap: 10px;
+  flex-direction: column;
+  justify-content: center;
   min-height: 59px;
   margin-bottom: 4px;
-  padding: 14px 24px 18px;
+  padding: 14px 24px 15px;
   border-radius: var(--card-radius);
   background: var(--yellow);
   overflow: hidden;
@@ -162,27 +175,11 @@ button {
   transform: scale(0.98);
 }
 
-/* Fade out + height collapse after completion (height is set inline by JS) */
-.habit.is-collapsing {
-  opacity: 0;
-  min-height: 0;
-  margin-bottom: 0;
-  padding-top: 0;
-  padding-bottom: 0;
-  transition:
-    opacity 0.3s ease,
-    height 0.35s ease 0.1s,
-    margin 0.35s ease 0.1s,
-    padding 0.35s ease 0.1s,
-    min-height 0.35s ease 0.1s;
-}
-
 .check {
   position: relative;
   flex: none;
   width: 24px;
   height: 24px;
-  margin-top: 3px;
   border: 2px solid var(--text);
   border-radius: 50%;
   transition: background-color 0.15s ease;
@@ -201,6 +198,7 @@ button {
   margin: auto;
   width: 12px;
   height: 12px;
+  color: var(--yellow);
   opacity: 0;
   transform: scale(0.6);
   transition: opacity 0.15s ease, transform 0.2s ease;
@@ -215,27 +213,38 @@ button {
   transform: scale(1);
 }
 
-.habit__body {
-  min-width: 0;
-  flex: 1;
+/* Circle + name: the circle centers on the name line, never on the whole card */
+.habit__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .habit__name {
+  min-width: 0;
   font-size: 23px;
   font-weight: 500;
-  line-height: 26px;
+  line-height: 1;
+}
+
+/* Note and editor sit under the name (circle 24px + gap 10px) */
+.habit__note,
+.habit__input {
+  margin-left: 34px;
 }
 
 .habit__note {
+  margin-top: 5px;
   font-size: 12.5px;
+  font-weight: 300;
   line-height: 14px;
   overflow-wrap: anywhere;
 }
 
 .habit__input {
   display: block;
-  width: 100%;
-  margin-top: 2px;
+  width: calc(100% - 34px);
+  margin-top: 5px;
   padding: 2px 0;
   border: 0;
   border-bottom: 1px solid rgba(45, 45, 45, 0.35);
@@ -262,19 +271,16 @@ button {
   justify-content: center;
   min-height: 120px;
   margin-top: 11px;
-  font-size: 22px;
-  line-height: 26px;
+  font-family: var(--font-serif);
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
   text-align: center;
-  animation: fade-in 0.4s ease;
 }
 
 .all-done[hidden] {
   display: none;
-}
-
-@keyframes fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
 }
 
 /* ---------- Current week ---------- */
@@ -362,13 +368,4 @@ button {
 
 .week-total[hidden] {
   display: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-  }
 }
