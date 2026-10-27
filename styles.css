@@ -176,19 +176,7 @@ button {
   justify-content: center;
   gap: 5px;
   padding: 0 var(--safe-right) max(var(--safe-bottom), 6px) var(--safe-left);
-  background: var(--bg);
-}
-
-/* Content scrolling under the bar fades out instead of being cut */
-.tabbar::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 100%;
-  height: 16px;
-  background: linear-gradient(to bottom, rgba(255, 252, 243, 0), var(--bg));
-  pointer-events: none;
+  pointer-events: none; /* no bar: content between and around the pills stays tappable */
 }
 
 .tab {
@@ -196,6 +184,7 @@ button {
   align-items: center;
   height: var(--tab-height);
   touch-action: manipulation;
+  pointer-events: auto;
 }
 
 .tab__pill {
@@ -203,6 +192,7 @@ button {
   padding: 0 11px;
   border: 1.5px solid var(--text);
   border-radius: 999px;
+  background: var(--bg); /* readable over content scrolling behind */
   font-size: 14px;
   line-height: 25px;
   white-space: nowrap;
