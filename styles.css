@@ -8,6 +8,7 @@
   --text: #2D2D2D;
   --cream: #FFFCF3;
   --orange: #E07D28;
+  --orange-soft: #EDB27E; /* dashed lines in the statistics */
   --muted: #979797; /* "+ add a task" */
   --empty: #EAEAEA;
   --bg: var(--cream);
@@ -468,6 +469,232 @@ button {
 
 .week-total[hidden] {
   display: none;
+}
+
+/* ---------- Statistics ---------- */
+
+.stats {
+  margin-top: 110px;
+}
+
+.stats-month {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 2px;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.stats-month__arrow {
+  position: relative;
+  padding: 0 5px;
+  font-size: 18px;
+  touch-action: manipulation;
+}
+
+/* 44px tap target without changing the spacing */
+.stats-month__arrow::before {
+  content: "";
+  position: absolute;
+  inset: -12px -8px;
+}
+
+.stats-month__arrow:disabled {
+  opacity: 0.2;
+  cursor: default;
+}
+
+.stats-month__total {
+  margin-left: 4px;
+}
+
+.radar {
+  position: relative; /* anchors the tip */
+  width: min(390px, 100%);
+  margin: 4px auto 0;
+}
+
+.radar svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.radar__ring,
+.radar__spoke {
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 1;
+}
+
+.radar__shape {
+  fill: none;
+  stroke: var(--orange);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.radar__shape--prev {
+  stroke: var(--orange-soft);
+  stroke-width: 1.2;
+  stroke-dasharray: 5 4;
+}
+
+.radar__dot {
+  fill: var(--orange);
+}
+
+.radar__label {
+  fill: var(--text);
+  font-size: 13px;
+  font-weight: 300;
+}
+
+.radar__hit {
+  cursor: pointer;
+}
+
+.radar__hit circle {
+  fill: transparent;
+}
+
+.radar__hit.is-picked .radar__label {
+  fill: var(--orange);
+}
+
+.chart-tip {
+  position: absolute;
+  z-index: 3;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--cream);
+  font-size: 12px;
+  line-height: 22px;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.chart-tip[hidden] {
+  display: none;
+}
+
+.weekly {
+  margin-top: 70px;
+}
+
+.bar-filters {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 9px;
+  max-width: 290px;
+  padding: 0 16px;
+}
+
+.bar-filter {
+  position: relative;
+  font-size: 15px;
+  line-height: 19px;
+  text-decoration: underline transparent;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  touch-action: manipulation;
+}
+
+.bar-filter::before {
+  content: "";
+  position: absolute;
+  inset: -5px -4px;
+}
+
+.bar-filter.is-active {
+  text-decoration-color: currentColor;
+}
+
+.bars {
+  --bar-h: 190px;
+  --bars-top: 30px; /* room for the tip over a 100% bar */
+  position: relative; /* anchors the goal line and the tip */
+  margin-top: -2px;
+}
+
+.bars__scroll {
+  margin-right: 46px; /* "75%" sits right of the bars */
+  padding: var(--bars-top) 0 0 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.bars__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.bars__track {
+  display: flex;
+  gap: 16px;
+  width: max-content;
+  padding-right: 8px;
+}
+
+.bars__group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.bars__cols {
+  display: flex;
+  gap: 5px;
+  height: var(--bar-h);
+}
+
+.bar {
+  position: relative;
+  width: 17px;
+  height: 100%;
+  touch-action: manipulation;
+}
+
+.bar__fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--yellow);
+}
+
+.bar.is-current .bar__fill {
+  background: var(--orange);
+}
+
+.bars__month {
+  margin-top: 9px;
+  font-size: 14px;
+  line-height: 17px;
+  white-space: nowrap;
+}
+
+.bars__goal {
+  position: absolute;
+  left: 0;
+  right: 46px;
+  top: calc(var(--bars-top) + var(--bar-h) * 0.25);
+  border-top: 1px dashed var(--orange-soft);
+  pointer-events: none;
+}
+
+.bars__goal span {
+  position: absolute;
+  right: -40px;
+  top: 0;
+  transform: translateY(-50%);
+  font-size: 14px;
+  line-height: 17px;
 }
 
 /* ---------- To Do List ---------- */

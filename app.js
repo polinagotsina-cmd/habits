@@ -42,6 +42,16 @@ const GONE_BACKGROUND = 'rgba(238, 238, 238, 0)'; // yellow fades toward transpa
 const WEEKDAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
+const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+  'August', 'September', 'October', 'November', 'December'];
+
+// Statistics: radar spokes run clockwise from the top in this order, filters
+// left to right. Habits missing from a list are appended, so new ones show up.
+const RADAR_ORDER = ['design', 'language', 'blog', 'smartass', 'sport'];
+const FILTER_ORDER = ['sport', 'language', 'blog', 'smartass', 'design'];
+const RADAR = { width: 390, height: 320, r: 130, labelGap: 8 }; // SVG units
+const TIP_GAP = 6;
+
 const CHECK_SVG =
   '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.2 5 8.6 9.5 3.6" ' +
   'fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -249,6 +259,16 @@ const els = {
   week: $('.week'),
   grid: $('#week-grid'),
   weekTotal: $('#week-total'),
+  monthPrev: $('#stats-prev'),
+  monthNext: $('#stats-next'),
+  monthName: $('#stats-month-name'),
+  monthTotal: $('#stats-month-total'),
+  radar: $('#radar'),
+  radarTip: $('#radar .chart-tip'),
+  filters: $('#bar-filters'),
+  bars: $('#bars'),
+  barsScroll: $('#bars .bars__scroll'),
+  barTip: $('#bars .chart-tip'),
 };
 
 /* ---------- Welcome screen ---------- */
@@ -550,6 +570,7 @@ function toggleCard(li, habit) {
     li.classList.remove('is-done');
     Store.setDone(currentDay, habit.id, false);
     renderWeek();
+    renderStats();
     return;
   }
 
@@ -557,6 +578,7 @@ function toggleCard(li, habit) {
   li.classList.add('is-done');
   li.querySelector('.check').setAttribute('aria-label', `Undo ${habit.name}`);
   renderWeek();
+  renderStats();
   li._leaveTimer = setTimeout(() => leaveCard(li), COMPLETE_DELAY_MS);
 }
 
@@ -682,8 +704,271 @@ function initGrid() {
     const { day, id } = cell.dataset;
     Store.setDone(day, id, !Store.isDone(day, id));
     renderWeek();
+    renderStats();
     // Today's (and, via note carry-over, any) change can affect the list
     renderToday({ animate: true });
+  });
+}
+
+/* ---------- Statistics ----------
+   Radar: each habit's share of the chosen month (dashed = month before).
+   Bars: one per week since tracking started, grouped by month.
+   All math lives in stats.js; tracking starts on the earliest day with data.
+   Tapping a point, label or bar shows a tip; tapping elsewhere hides it. */
+
+let statsMonth = null; // "YYYY-MM" in the radar; null = the current month
+let radarPick = null; // habit id with its tip showing
+let barFilter = 'all'; // 'all' or a habit id
+let barPick = null; // Monday of the week with its tip showing
+
+const habitIds = () => HABITS.map((h) => h.id);
+const pct = (fraction) => `${Math.round(fraction * 100)}%`;
+
+function trackingStart() {
+  const earliest = Store.earliestKey();
+  return earliest && earliest < currentDay ? earliest : currentDay;
+}
+
+function orderedHabits(order) {
+  const rank = (h) => (order.includes(h.id) ? order.indexOf(h.id) : order.length);
+  return [...HABITS].sort((a, b) => rank(a) - rank(b));
+}
+
+// "October", or "October 2025" outside the current year; short: "Oct"
+function monthLabel(month, short = false) {
+  const [y, m] = month.split('-').map(Number);
+  const name = short ? MONTH_NAMES[m - 1].slice(0, 3) : MONTH_NAMES[m - 1];
+  return y === fromKey(currentDay).getFullYear() ? name : `${name} ${y}`;
+}
+
+// "Oct 26"
+function shortDate(key) {
+  const d = fromKey(key);
+  return `${MONTH_NAMES[d.getMonth()].slice(0, 3)} ${d.getDate()}`;
+}
+
+function escapeXML(text) {
+  return text.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
+}
+
+function renderStats() {
+  renderMonth();
+  renderBars();
+}
+
+function renderMonth() {
+  const start = trackingStart();
+  const first = Stats.monthOf(start);
+  const last = Stats.monthOf(currentDay);
+  if (!statsMonth || statsMonth > last) statsMonth = last;
+  if (statsMonth < first) statsMonth = first;
+
+  const ids = habitIds();
+  const current = Stats.monthStats(Store.data.days, ids, statsMonth, start);
+  const previous = Stats.monthStats(Store.data.days, ids, Stats.addMonths(statsMonth, -1), start);
+
+  els.monthName.textContent = monthLabel(statsMonth);
+  els.monthTotal.textContent = `· ${pct(current.total)}`;
+  els.monthPrev.disabled = statsMonth <= first;
+  els.monthNext.disabled = statsMonth >= last;
+  renderRadar(current, previous);
+}
+
+function renderRadar(current, previous) {
+  const habits = orderedHabits(RADAR_ORDER);
+  const { width, height, r, labelGap } = RADAR;
+  const cx = width / 2;
+  const cy = height / 2;
+  const angle = (i) => (2 * Math.PI * i) / habits.length; // clockwise from 12 o'clock
+  const at = (i, dist) => [cx + dist * Math.sin(angle(i)), cy - dist * Math.cos(angle(i))];
+  const xy = ([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`;
+  const shape = (stats) => habits.map((h, i) => xy(at(i, r * stats.byHabit[h.id]))).join(' ');
+
+  let svg = `<circle class="radar__ring" cx="${cx}" cy="${cy}" r="${r}"/>`;
+  habits.forEach((h, i) => {
+    const [x, y] = at(i, r);
+    svg += `<line class="radar__spoke" x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}"/>`;
+  });
+  if (previous) svg += `<polygon class="radar__shape radar__shape--prev" points="${shape(previous)}"/>`;
+  svg += `<polygon class="radar__shape" points="${shape(current)}"/>`;
+
+  const points = {};
+  habits.forEach((h, i) => {
+    const point = at(i, r * current.byHabit[h.id]);
+    points[h.id] = point;
+    // Labels sit just outside the ring, pushed away from it on every side
+    const [lx, ly] = at(i, r + labelGap);
+    const sin = Math.sin(angle(i));
+    const cos = Math.cos(angle(i));
+    const anchor = Math.abs(sin) < 0.2 ? 'middle' : sin > 0 ? 'start' : 'end';
+    const dy = cos > 0.5 ? '0' : cos < -0.5 ? '0.8em' : '0.35em';
+    const name = escapeXML(h.name);
+    svg += `
+      <g class="radar__hit${h.id === radarPick ? ' is-picked' : ''}" data-id="${h.id}" role="button"
+        aria-label="${name}: ${pct(current.byHabit[h.id])}">
+        <circle cx="${point[0].toFixed(1)}" cy="${point[1].toFixed(1)}" r="16"/>
+        <text class="radar__label" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" dy="${dy}"
+          text-anchor="${anchor}">${name}</text>
+      </g>`;
+  });
+  if (points[radarPick]) {
+    const [x, y] = points[radarPick];
+    svg += `<circle class="radar__dot" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5"/>`;
+  }
+
+  els.radarSvg.innerHTML = svg;
+  els.radarSvg._points = points;
+  els.radarSvg._values = current.byHabit;
+  placeRadarTip();
+}
+
+function renderBars() {
+  const habits = orderedHabits(FILTER_ORDER);
+  if (!habits.some((h) => h.id === barFilter)) barFilter = 'all';
+  els.filters.replaceChildren(...[{ id: 'all', name: 'All' }, ...habits].map((h) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `bar-filter${h.id === barFilter ? ' is-active' : ''}`;
+    btn.dataset.id = h.id;
+    btn.textContent = h.name;
+    btn.setAttribute('aria-pressed', String(h.id === barFilter));
+    return btn;
+  }));
+
+  // Weeks grouped by the month that holds most of their days
+  const ids = habitIds();
+  const mondays = Stats.weekStarts(trackingStart(), currentDay);
+  const thisWeek = mondays[mondays.length - 1];
+  const groups = [];
+  for (const monday of mondays) {
+    const month = Stats.weekMonth(monday);
+    if (!groups.length || groups[groups.length - 1].month !== month) groups.push({ month, weeks: [] });
+    const stats = Stats.weekStats(Store.data.days, ids, monday);
+    groups[groups.length - 1].weeks.push({ monday, value: barFilter === 'all' ? stats.total : stats.byHabit[barFilter] });
+  }
+
+  const track = document.createElement('div');
+  track.className = 'bars__track';
+  for (const group of groups) {
+    const groupEl = document.createElement('div');
+    groupEl.className = 'bars__group';
+    const cols = document.createElement('div');
+    cols.className = 'bars__cols';
+    for (const { monday, value } of group.weeks) {
+      const bar = document.createElement('button');
+      bar.type = 'button';
+      bar.className = `bar${monday === thisWeek ? ' is-current' : ''}`;
+      bar.dataset.monday = monday;
+      bar.dataset.label = `${shortDate(monday)} – ${shortDate(Stats.addDays(monday, 6))} · ${pct(value)}`;
+      bar.setAttribute('aria-label', bar.dataset.label);
+      const fill = document.createElement('span');
+      fill.className = 'bar__fill';
+      fill.style.height = `${value * 100}%`;
+      bar.appendChild(fill);
+      cols.appendChild(bar);
+    }
+    const label = document.createElement('div');
+    label.className = 'bars__month';
+    label.textContent = monthLabel(group.month, true);
+    groupEl.append(cols, label);
+    track.appendChild(groupEl);
+  }
+
+  // Opens on the newest week and follows it, unless scrolled back in time
+  const scroll = els.barsScroll;
+  const atEnd = !scroll.hasChildNodes() || scroll.scrollLeft + scroll.clientWidth >= scroll.scrollWidth - 2;
+  scroll.replaceChildren(track);
+  if (atEnd) scroll.scrollLeft = scroll.scrollWidth;
+  placeBarTip();
+}
+
+// x, y: the anchor relative to wrap. The tip sits above it, inside wrap.
+function showTip(tip, wrap, x, y, text) {
+  tip.textContent = text;
+  tip.hidden = false;
+  const left = Math.min(Math.max(x - tip.offsetWidth / 2, 0), wrap.clientWidth - tip.offsetWidth);
+  tip.style.left = `${left}px`;
+  tip.style.top = `${y - tip.offsetHeight - TIP_GAP}px`;
+}
+
+function placeRadarTip() {
+  const svg = els.radarSvg;
+  const point = radarPick && svg._points[radarPick];
+  if (!point) {
+    els.radarTip.hidden = true;
+    return;
+  }
+  const box = svg.getBoundingClientRect();
+  const wrap = els.radar.getBoundingClientRect();
+  const scale = box.width / RADAR.width;
+  const habit = HABITS.find((h) => h.id === radarPick);
+  showTip(els.radarTip, els.radar,
+    box.left - wrap.left + point[0] * scale,
+    box.top - wrap.top + point[1] * scale,
+    `${habit.name} · ${pct(svg._values[radarPick])}`);
+}
+
+function placeBarTip() {
+  const bar = barPick && els.barsScroll.querySelector(`.bar[data-monday="${barPick}"]`);
+  const view = els.barsScroll.getBoundingClientRect();
+  const box = bar && bar.querySelector('.bar__fill').getBoundingClientRect();
+  const x = box && box.left + box.width / 2;
+  if (!bar || x < view.left || x > view.right) {
+    els.barTip.hidden = true;
+    return;
+  }
+  const wrap = els.bars.getBoundingClientRect();
+  showTip(els.barTip, els.bars, x - wrap.left, box.top - wrap.top, bar.dataset.label);
+}
+
+function initStats() {
+  els.radarSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  els.radarSvg.setAttribute('viewBox', `0 0 ${RADAR.width} ${RADAR.height}`);
+  els.radar.prepend(els.radarSvg);
+
+  const changeMonth = (n) => {
+    statsMonth = Stats.addMonths(statsMonth, n);
+    radarPick = null;
+    renderMonth();
+  };
+  els.monthPrev.addEventListener('click', () => changeMonth(-1));
+  els.monthNext.addEventListener('click', () => changeMonth(1));
+
+  els.radarSvg.addEventListener('click', (e) => {
+    const hit = e.target.closest('.radar__hit');
+    if (!hit) return;
+    radarPick = radarPick === hit.dataset.id ? null : hit.dataset.id;
+    renderMonth();
+  });
+
+  els.filters.addEventListener('click', (e) => {
+    const btn = e.target.closest('.bar-filter');
+    if (!btn) return;
+    barFilter = btn.dataset.id;
+    renderBars();
+  });
+
+  els.barsScroll.addEventListener('click', (e) => {
+    const bar = e.target.closest('.bar');
+    if (!bar) return;
+    barPick = barPick === bar.dataset.monday ? null : bar.dataset.monday;
+    placeBarTip();
+  });
+  els.barsScroll.addEventListener('scroll', placeBarTip, { passive: true });
+
+  document.addEventListener('click', (e) => {
+    if (e.target.closest('.radar__hit, .bar, .bar-filter')) return;
+    if (radarPick) {
+      radarPick = null;
+      renderMonth();
+    }
+    barPick = null;
+    els.barTip.hidden = true;
+  });
+
+  window.addEventListener('resize', () => {
+    placeRadarTip();
+    placeBarTip();
   });
 }
 
@@ -874,8 +1159,10 @@ let midnightTimer = null;
 
 function renderAll() {
   currentDay = todayKey();
+  statsMonth = null; // back to the current month
   renderToday();
   renderWeek();
+  renderStats();
   renderTodos();
 }
 
@@ -916,6 +1203,7 @@ function registerServiceWorker() {
 Store.load();
 initWelcome();
 initGrid();
+initStats();
 initTodos();
 initTabs();
 renderAll();

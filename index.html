@@ -47,6 +47,28 @@
       <div id="week-grid" class="week-grid" role="grid"></div>
       <p id="week-total" class="week-total" hidden></p>
     </section>
+
+    <section class="stats" aria-labelledby="stats-heading">
+      <h2 id="stats-heading" class="section-title">Statistics</h2>
+      <div class="stats-month">
+        <button id="stats-prev" class="stats-month__arrow" type="button" aria-label="Previous month">‹</button>
+        <span id="stats-month-name"></span>
+        <button id="stats-next" class="stats-month__arrow" type="button" aria-label="Next month">›</button>
+        <span id="stats-month-total" class="stats-month__total"></span>
+      </div>
+      <div id="radar" class="radar">
+        <div class="chart-tip" hidden></div>
+      </div>
+
+      <div class="weekly">
+        <div id="bar-filters" class="bar-filters" role="group" aria-label="Show"></div>
+        <div id="bars" class="bars">
+          <div class="bars__scroll"></div>
+          <div class="bars__goal"><span>75%</span></div>
+          <div class="chart-tip" hidden></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <!-- Screen: To Do List -->
@@ -79,6 +101,7 @@
     <button class="tab" type="button" data-screen="todo" aria-pressed="false"><span class="tab__pill">To do list</span></button>
   </nav>
 
+  <script src="stats.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
