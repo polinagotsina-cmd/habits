@@ -140,6 +140,95 @@ button {
   color: var(--orange);
 }
 
+/* ---------- Login ---------- */
+
+/* Under the welcome screen, over everything else */
+.login {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--safe-top) 16px var(--safe-bottom);
+  background: var(--bg);
+}
+
+.login[hidden] {
+  display: none;
+}
+
+.login__form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(280px, 100%);
+}
+
+.login__title {
+  margin: 10px 0 28px;
+  font-family: var(--font-serif);
+  font-size: 40px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.04em;
+  text-align: center;
+}
+
+.login__input {
+  display: block;
+  width: 100%;
+  margin-bottom: 18px;
+  padding: 6px 0;
+  border: 0;
+  border-bottom: 1px solid rgba(45, 45, 45, 0.35);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px; /* >= 16px so iOS doesn't zoom */
+  line-height: 20px;
+  letter-spacing: -0.02em;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.login__input:focus {
+  border-bottom-color: var(--orange);
+}
+
+.login__input::placeholder {
+  color: var(--muted);
+}
+
+.login__button {
+  margin-top: 10px;
+  padding: 0 22px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--cream);
+  font-size: 16px;
+  line-height: 36px;
+  letter-spacing: -0.02em;
+  touch-action: manipulation;
+}
+
+.login__button:disabled {
+  opacity: 0.5;
+}
+
+.login__error {
+  min-height: 18px;
+  margin-top: 14px;
+  color: var(--orange);
+  font-size: 14px;
+  line-height: 18px;
+  text-align: center;
+}
+
 /* ---------- Screens & bottom tabs ---------- */
 
 /* Each screen is its own scroll layer, so switching tabs is a plain

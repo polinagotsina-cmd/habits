@@ -30,6 +30,20 @@
     <p class="welcome__tagline">Jarvis-Approved Daily Excellence</p>
   </div>
 
+  <!-- One-time login (shown until there's a session) -->
+  <div id="login" class="login" hidden>
+    <form class="login__form" novalidate>
+      <div class="welcome__emoji">🥨</div>
+      <h1 class="login__title">Log in to <span class="accent">Jade!</span></h1>
+      <input class="login__input" name="email" type="email" placeholder="Email"
+        autocomplete="username" autocapitalize="off" spellcheck="false" required>
+      <input class="login__input" name="password" type="password" placeholder="Password"
+        autocomplete="current-password" required>
+      <button class="login__button" type="submit">Log in</button>
+      <p class="login__error" aria-live="polite"></p>
+    </form>
+  </div>
+
   <!-- Screen: Habits -->
   <main id="habits" class="screen app is-active" aria-label="Habits">
     <header class="app__header">
@@ -102,6 +116,7 @@
   </nav>
 
   <script src="stats.js"></script>
+  <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

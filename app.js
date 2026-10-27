@@ -4,23 +4,30 @@
    Jade! — app logic
    Data lives in localStorage under STORAGE_KEY:
      {
-       version: 2,
+       version: 3,
+       habits: [{ id, name, position, archived }],
        days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } },
-       todos: { today: [item], longterm: [item], goals: [item] }
+       todos: { today: [item], longterm: [item], goals: [item] },
+       sync: { pending: { key: { table, row } }, cursor, user }
      }
-   item = { id, text, created: "YYYY-MM-DD", doneOn: "YYYY-MM-DD" | null }.
-   Items are objects so goals can grow extra fields (e.g. progress) later.
-   Version 1 had no `todos`; it's added on load, habit data is untouched.
+   item = { id, text, created: "YYYY-MM-DD", doneOn: "YYYY-MM-DD" | null,
+            position, parentId }.
+   Every change also goes through Sync.queue (sync.js) to Supabase; this
+   local copy is what the app renders, so it opens instantly and offline.
+   Older versions are upgraded on load by adding fields; nothing is lost.
    ========================================================================== */
 
-// Hardcoded for now; editing the list comes later. Ids are what get stored.
-const HABITS = [
+// The habit list before the first sync; Store.data.habits after that.
+// Ids are what get stored.
+const DEFAULT_HABITS = [
   { id: 'sport', name: 'Sport' },
   { id: 'language', name: 'Language' },
   { id: 'blog', name: 'Blog/Clients' },
   { id: 'design', name: 'Design/Code' },
   { id: 'smartass', name: 'Smartass' },
 ];
+
+let HABITS = []; // active habits in display order, see refreshHabits()
 
 const STORAGE_KEY = 'habits.v1'; // name kept so existing data stays put
 const TODO_LISTS = ['today', 'longterm', 'goals'];
@@ -114,14 +121,26 @@ const Store = {
     this.migrate();
   },
 
-  // v1 -> v2: add the to-do lists. Nothing else changes.
+  // v1 -> v2: add the to-do lists. v2 -> v3: add the habit list, item
+  // positions and the sync state. Existing data is never touched.
   migrate() {
     const d = this.data;
     if (!d.todos || typeof d.todos !== 'object') d.todos = {};
     for (const name of TODO_LISTS) {
       if (!Array.isArray(d.todos[name])) d.todos[name] = [];
+      d.todos[name].forEach((item, i) => {
+        if (typeof item.position !== 'number') item.position = i;
+        if (item.parentId === undefined) item.parentId = null;
+      });
     }
-    d.version = Math.max(d.version || 1, 2);
+    if (!Array.isArray(d.habits)) {
+      d.habits = DEFAULT_HABITS.map((h, i) => ({ ...h, position: i, archived: false }));
+    }
+    if (!d.sync || typeof d.sync !== 'object') d.sync = {};
+    if (!d.sync.pending || typeof d.sync.pending !== 'object') d.sync.pending = {};
+    if (d.sync.cursor === undefined) d.sync.cursor = null;
+    if (d.sync.user === undefined) d.sync.user = null;
+    d.version = Math.max(d.version || 1, 3);
   },
 
   save() {
@@ -156,6 +175,7 @@ const Store = {
     if (done) day.done[id] = true;
     else delete day.done[id];
     this.prune(key);
+    Sync.queue('habit_checks', Rows.check(key, id, done));
     this.save();
   },
 
@@ -186,6 +206,7 @@ const Store = {
     delete day.notes[id];
     // Only store an own note if it differs from what would carry over
     if (this.getNote(key, id) !== text) day.notes[id] = text;
+    Sync.queue('habit_notes', Rows.note(key, id, id in day.notes ? day.notes[id] : null));
     this.prune(key);
     this.save();
   },
@@ -206,8 +227,11 @@ const Store = {
       text,
       created: currentDay,
       doneOn: null,
+      position: Math.max(-1, ...this.todos(list).map((t) => t.position)) + 1,
+      parentId: null,
     };
     this.todos(list).push(item);
+    Sync.queue('todos', Rows.todo(list, item));
     this.save();
     return item;
   },
@@ -216,6 +240,7 @@ const Store = {
     const item = this.todo(list, id);
     if (!item) return;
     item.doneOn = done ? currentDay : null;
+    Sync.queue('todos', Rows.todo(list, item));
     this.save();
   },
 
@@ -223,16 +248,20 @@ const Store = {
     const item = this.todo(list, id);
     if (!item) return;
     item.text = text;
+    Sync.queue('todos', Rows.todo(list, item));
     this.save();
   },
 
   removeTodo(list, id) {
+    const item = this.todo(list, id);
+    if (item) Sync.queue('todos', Rows.todo(list, item, true));
     this.data.todos[list] = this.todos(list).filter((t) => t.id !== id);
     this.save();
   },
 
   // Checked items stay (struck through) for the rest of their day and are
-  // gone from the next day on. Unchecked items carry over.
+  // gone from the next day on. Unchecked items carry over. Local only: the
+  // server keeps them as history.
   purgeTodos(key) {
     let changed = false;
     for (const name of TODO_LISTS) {
@@ -269,6 +298,9 @@ const els = {
   bars: $('#bars'),
   barsScroll: $('#bars .bars__scroll'),
   barTip: $('#bars .chart-tip'),
+  login: $('#login'),
+  loginForm: $('#login form'),
+  loginError: $('#login .login__error'),
 };
 
 /* ---------- Welcome screen ---------- */
@@ -1153,6 +1185,60 @@ function initTabs() {
   });
 }
 
+/* ---------- Login & sync ----------
+   One-time login (no sign-up: the account is made in Supabase). The
+   session is kept, so the phone stays logged in; the login screen only
+   comes back if Supabase rejects the session. */
+
+function refreshHabits() {
+  HABITS = Store.data.habits
+    .filter((h) => !h.archived)
+    .sort((a, b) => a.position - b.position);
+}
+
+function showLogin(show) {
+  els.login.hidden = !show;
+  if (show) els.loginError.textContent = '';
+}
+
+function initLogin() {
+  els.loginForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = els.loginForm.email.value.trim();
+    const password = els.loginForm.password.value;
+    const button = els.loginForm.querySelector('button');
+    button.disabled = true;
+    els.loginError.textContent = '';
+    try {
+      await Auth.signIn(email, password);
+      els.loginForm.password.value = '';
+      document.activeElement.blur();
+      showLogin(false);
+      Sync.schedule(); // first login uploads the local data
+    } catch (err) {
+      els.loginError.textContent = navigator.onLine && err.status
+        ? 'Wrong email or password'
+        : 'No connection. Try again when online.';
+    } finally {
+      button.disabled = false;
+    }
+  });
+}
+
+// Pulled changes: re-render, but not under an open editor
+function onRemoteChange() {
+  const editing = document.activeElement && document.activeElement.matches('input');
+  if (editing || !els.login.hidden) {
+    setTimeout(onRemoteChange, 1000);
+    return;
+  }
+  refreshHabits();
+  renderToday();
+  renderWeek();
+  renderStats();
+  renderTodos();
+}
+
 /* ---------- Day change ---------- */
 
 let midnightTimer = null;
@@ -1201,11 +1287,19 @@ function registerServiceWorker() {
 /* ---------- Boot ---------- */
 
 Store.load();
+refreshHabits();
+Auth.load();
+Sync.onChange = onRemoteChange;
+Sync.onSignedOut = () => showLogin(true);
 initWelcome();
+initLogin();
+showLogin(!Auth.session);
 initGrid();
 initStats();
 initTodos();
 initTabs();
 renderAll();
 initDayWatch();
+Sync.init();
+Sync.schedule();
 registerServiceWorker();
