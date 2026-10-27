@@ -1,16 +1,20 @@
 /* ==========================================================================
-   Habits — styles
+   Jade! — styles
    Mockups are 390 × 844 @1x; sizes below are taken from them directly.
    ========================================================================== */
 
 :root {
   --yellow: #FFEAB1;
   --text: #2D2D2D;
-  --empty: #EEEEEE;
-  --bg: #FFFFFF;
+  --cream: #FFFCF3;
+  --orange: #E07D28;
+  --muted: #979797; /* "+ add a task" */
+  --empty: #EAEAEA;
+  --bg: var(--cream);
 
   --font-serif: "Instrument Serif", "Times New Roman", serif;
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif,
+    "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
 
   --card-radius: 12px;
   --cell: 18px;
@@ -22,6 +26,10 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
+
+  --tab-height: 44px; /* tap target; the visible pill is smaller */
+  --tabbar-height: calc(var(--tab-height) + max(var(--safe-bottom), 6px));
+  --screen-fade: 0.2s;
 
   color-scheme: light;
 }
@@ -38,18 +46,21 @@ html {
   background: var(--bg);
 }
 
+/* The screens scroll themselves (see .screen), the page never does */
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
 body {
   margin: 0;
-  min-height: 100vh;
-  min-height: 100dvh;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-sans);
   font-weight: 400;
   -webkit-font-smoothing: antialiased;
   -webkit-tap-highlight-color: transparent;
-  overflow-x: hidden;
-  overflow-anchor: none; /* don't let scroll anchoring fight the FLIP slides */
   /* App-like: no text selection / callouts except inside inputs */
   -webkit-user-select: none;
   user-select: none;
@@ -65,7 +76,8 @@ h1, h2, p, ul {
    be frozen at body's font size. Serif text (.logo, .welcome__title,
    .all-done) overrides this further down. */
 .app,
-.app * {
+.app *,
+.tabbar * {
   letter-spacing: -0.04em;
 }
 
@@ -81,15 +93,17 @@ button {
   appearance: none;
 }
 
-/* ---------- Screen 1: Welcome ---------- */
+/* ---------- Welcome ---------- */
 
 .welcome {
   position: fixed;
   inset: 0;
   z-index: 10;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  text-align: center;
   background: var(--bg);
   transition: opacity 0.5s ease, visibility 0s linear 0.5s;
 }
@@ -100,24 +114,107 @@ button {
   pointer-events: none;
 }
 
+.welcome__emoji {
+  font-size: 46px;
+  line-height: 1;
+}
+
 .welcome__title {
+  margin-top: 10px;
   font-family: var(--font-serif);
   font-weight: 400;
   font-size: 48px;
-  line-height: 1;
+  line-height: 45px;
   letter-spacing: -0.04em;
 }
 
-/* ---------- Screen 2: Habits ---------- */
+.welcome__tagline {
+  margin-top: 12px;
+  font-size: 15px;
+  line-height: 18px;
+  letter-spacing: -0.02em;
+}
 
-.app {
-  position: relative;
+.accent {
+  color: var(--orange);
+}
+
+/* ---------- Screens & bottom tabs ---------- */
+
+/* Each screen is its own scroll layer, so switching tabs is a plain
+   crossfade and each tab keeps its scroll position. */
+.screen {
+  position: fixed;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  overflow-anchor: none; /* don't let scroll anchoring fight the FLIP slides */
   padding:
     var(--safe-top)
     var(--safe-right)
-    calc(var(--safe-bottom) + 48px)
+    calc(var(--tabbar-height) + 32px)
     var(--safe-left);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--screen-fade) ease, visibility 0s linear var(--screen-fade);
 }
+
+.screen.is-active {
+  opacity: 1;
+  visibility: visible;
+  transition: opacity var(--screen-fade) ease;
+}
+
+.tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+  gap: 5px;
+  padding: 0 var(--safe-right) max(var(--safe-bottom), 6px) var(--safe-left);
+  background: var(--bg);
+}
+
+/* Content scrolling under the bar fades out instead of being cut */
+.tabbar::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 100%;
+  height: 16px;
+  background: linear-gradient(to bottom, rgba(255, 252, 243, 0), var(--bg));
+  pointer-events: none;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  height: var(--tab-height);
+  touch-action: manipulation;
+}
+
+.tab__pill {
+  display: block;
+  padding: 0 11px;
+  border: 1.5px solid var(--text);
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 25px;
+  white-space: nowrap;
+  transition: background-color var(--screen-fade) ease, color var(--screen-fade) ease;
+}
+
+.tab.is-active .tab__pill {
+  background: var(--text);
+  color: var(--cream);
+}
+
+/* ---------- Habits ---------- */
 
 .app__header {
   height: 74px;
@@ -134,11 +231,16 @@ button {
 }
 
 .section-title {
+  color: var(--orange);
   font-size: 24px;
   font-weight: 500;
   line-height: 29px;
   text-align: center;
   text-transform: uppercase;
+}
+
+.section-title--left {
+  text-align: left;
 }
 
 /* ---------- Today ---------- */
@@ -182,7 +284,7 @@ button {
   height: 24px;
   border: 2px solid var(--text);
   border-radius: 50%;
-  transition: background-color 0.15s ease;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 /* Bigger invisible hit area around the circle */
@@ -198,17 +300,20 @@ button {
   margin: auto;
   width: 12px;
   height: 12px;
-  color: var(--yellow);
+  color: var(--cream);
   opacity: 0;
   transform: scale(0.6);
   transition: opacity 0.15s ease, transform 0.2s ease;
 }
 
-.habit.is-done .check {
-  background: var(--text);
+.habit.is-done .check,
+.todo.is-done .check {
+  border-color: var(--orange);
+  background: var(--orange);
 }
 
-.habit.is-done .check svg {
+.habit.is-done .check svg,
+.todo.is-done .check svg {
   opacity: 1;
   transform: scale(1);
 }
@@ -222,12 +327,17 @@ button {
 
 .habit__name {
   min-width: 0;
+  transition: color 0.15s ease;
   font-size: 23px;
   font-weight: 500;
   line-height: 1;
 }
 
 /* Note and editor sit under the name (circle 24px + gap 10px) */
+.habit.is-done .habit__name {
+  color: var(--orange);
+}
+
 .habit__note,
 .habit__input {
   margin-left: 34px;
@@ -353,7 +463,7 @@ button {
   grid-row: 1 / span 5;
   align-self: stretch;
   margin: -3px;
-  border: 1px solid var(--text);
+  border: 1px solid var(--orange);
   border-radius: 6px;
   pointer-events: none;
   z-index: 2;
@@ -368,4 +478,129 @@ button {
 
 .week-total[hidden] {
   display: none;
+}
+
+/* ---------- To Do List ---------- */
+
+.todo-section {
+  width: min(339px, 100% - 32px);
+  margin: 80px auto 0;
+  padding: 0 4px;
+}
+
+.todo-section:first-of-type {
+  margin-top: 8px;
+}
+
+.todo-section .section-title {
+  margin-bottom: 14px;
+}
+
+.todo-section--card {
+  padding: 24px 30px 21px;
+  border-radius: var(--card-radius);
+  background: var(--yellow);
+}
+
+.todo-list {
+  list-style: none;
+}
+
+.todo,
+.todo-add__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0 6px;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+.todo {
+  touch-action: manipulation;
+  transition: transform 0.15s ease;
+}
+
+.todo.is-pressing {
+  transform: scale(0.98);
+}
+
+.check--sm {
+  width: 18px;
+  height: 18px;
+  margin-top: 1px; /* centred on the first line */
+  border-width: 1.5px;
+}
+
+.check--sm::before {
+  inset: -7px -12px;
+}
+
+.check--sm svg {
+  width: 10px;
+  height: 10px;
+}
+
+.todo__text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-decoration: line-through transparent;
+  text-decoration-thickness: 1px;
+  transition: color 0.15s ease, text-decoration-color 0.15s ease;
+}
+
+.todo.is-done .todo__text {
+  color: var(--orange);
+  text-decoration-color: var(--orange);
+}
+
+.todo__input {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid rgba(45, 45, 45, 0.35);
+  border-radius: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 16px; /* >= 16px so iOS doesn't zoom */
+  line-height: 20px;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.todo__input::placeholder {
+  color: var(--muted);
+}
+
+.todo-add {
+  margin-top: 13px;
+}
+
+.todo-add__btn {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin: -12px 0; /* 44px tap target without changing the spacing */
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 20px;
+  text-align: left;
+  touch-action: manipulation;
+}
+
+.todo-add__plus {
+  font-weight: 300;
+}
+
+/* Placeholder circle while typing a new item */
+.todo-add__row .check--sm {
+  opacity: 0.35;
+  cursor: default;
 }

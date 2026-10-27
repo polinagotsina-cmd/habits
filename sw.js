@@ -1,11 +1,11 @@
 'use strict';
 
-/* Habits — service worker
+/* Jade! — service worker
    All paths are relative to this file, so the app works from a subfolder
    (e.g. https://username.github.io/repo-name/).
    Bump CACHE_VERSION when you change the list of shell files. */
 
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const SHELL_CACHE = `habits-shell-${CACHE_VERSION}`;
 const FONT_CACHE = 'habits-fonts';
 

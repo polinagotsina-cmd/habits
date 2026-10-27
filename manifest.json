@@ -1,14 +1,14 @@
 {
-  "name": "Habits",
-  "short_name": "Habits",
-  "description": "Personal daily habit tracker",
+  "name": "Jade!",
+  "short_name": "Jade!",
+  "description": "Jarvis-Approved Daily Excellence",
   "id": "./",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#FFFFFF",
-  "theme_color": "#FFFFFF",
+  "background_color": "#FFFCF3",
+  "theme_color": "#FFFCF3",
   "icons": [
     {
       "src": "icons/icon-192.png",

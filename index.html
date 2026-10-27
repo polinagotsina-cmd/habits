@@ -3,19 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#FFFFFF">
+  <meta name="theme-color" content="#FFFCF3">
   <meta name="color-scheme" content="light">
 
   <!-- iOS home-screen app -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="Habits">
+  <meta name="apple-mobile-web-app-title" content="Jade!">
   <meta name="format-detection" content="telephone=no">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="manifest" href="manifest.json">
 
-  <title>Habits</title>
+  <title>Jade!</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -23,13 +23,15 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <!-- Screen 1: Welcome (shown on every launch, tap to skip) -->
+  <!-- Welcome (shown on every launch, tap to skip) -->
   <div id="welcome" class="welcome" aria-hidden="true">
-    <h1 class="welcome__title">Welcome!</h1>
+    <div class="welcome__emoji">🥨</div>
+    <h1 class="welcome__title">Welcome<br>to <span class="accent">Jade!</span></h1>
+    <p class="welcome__tagline">Jarvis-Approved Daily Excellence</p>
   </div>
 
-  <!-- Screen 2: Habits -->
-  <main id="app" class="app">
+  <!-- Screen: Habits -->
+  <main id="habits" class="screen app is-active" aria-label="Habits">
     <header class="app__header">
       <div class="logo">Habits</div>
     </header>
@@ -46,6 +48,36 @@
       <p id="week-total" class="week-total" hidden></p>
     </section>
   </main>
+
+  <!-- Screen: To Do List -->
+  <main id="todo" class="screen app" aria-label="To Do List">
+    <header class="app__header">
+      <div class="logo">To Do List</div>
+    </header>
+
+    <section class="todo-section" data-list="today" aria-label="Today's tasks">
+      <ul class="todo-list"></ul>
+      <div class="todo-add" data-label="add a task"></div>
+    </section>
+
+    <section class="todo-section" data-list="longterm" aria-labelledby="longterm-heading">
+      <h2 id="longterm-heading" class="section-title section-title--left">Long Term Tasks</h2>
+      <ul class="todo-list"></ul>
+      <div class="todo-add" data-label="add a task"></div>
+    </section>
+
+    <section class="todo-section todo-section--card" data-list="goals" aria-labelledby="goals-heading">
+      <h2 id="goals-heading" class="section-title section-title--left">Goals</h2>
+      <ul class="todo-list"></ul>
+      <div class="todo-add" data-label="add a goal"></div>
+    </section>
+  </main>
+
+  <!-- Bottom tab toggle -->
+  <nav class="tabbar" aria-label="Screens">
+    <button class="tab is-active" type="button" data-screen="habits" aria-pressed="true"><span class="tab__pill">Habits</span></button>
+    <button class="tab" type="button" data-screen="todo" aria-pressed="false"><span class="tab__pill">To do list</span></button>
+  </nav>
 
   <script src="app.js"></script>
 </body>

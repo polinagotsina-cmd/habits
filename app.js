@@ -1,9 +1,16 @@
 'use strict';
 
 /* ==========================================================================
-   Habits — app logic
+   Jade! — app logic
    Data lives in localStorage under STORAGE_KEY:
-     { version: 1, days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } } }
+     {
+       version: 2,
+       days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } },
+       todos: { today: [item], longterm: [item], goals: [item] }
+     }
+   item = { id, text, created: "YYYY-MM-DD", doneOn: "YYYY-MM-DD" | null }.
+   Items are objects so goals can grow extra fields (e.g. progress) later.
+   Version 1 had no `todos`; it's added on load, habit data is untouched.
    ========================================================================== */
 
 // Hardcoded for now; editing the list comes later. Ids are what get stored.
@@ -15,7 +22,8 @@ const HABITS = [
   { id: 'smartass', name: 'Smartass' },
 ];
 
-const STORAGE_KEY = 'habits.v1';
+const STORAGE_KEY = 'habits.v1'; // name kept so existing data stays put
+const TODO_LISTS = ['today', 'longterm', 'goals'];
 const WELCOME_MS = 1500;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_PX = 10;
@@ -88,14 +96,22 @@ const Store = {
   data: null,
 
   load() {
+    this.data = { version: 2, days: {} };
     try {
       const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY));
-      if (parsed && typeof parsed.days === 'object') {
-        this.data = parsed;
-        return;
-      }
+      if (parsed && parsed.days && typeof parsed.days === 'object') this.data = parsed;
     } catch (e) { /* fall through to empty data */ }
-    this.data = { version: 1, days: {} };
+    this.migrate();
+  },
+
+  // v1 -> v2: add the to-do lists. Nothing else changes.
+  migrate() {
+    const d = this.data;
+    if (!d.todos || typeof d.todos !== 'object') d.todos = {};
+    for (const name of TODO_LISTS) {
+      if (!Array.isArray(d.todos[name])) d.todos[name] = [];
+    }
+    d.version = Math.max(d.version || 1, 2);
   },
 
   save() {
@@ -162,6 +178,61 @@ const Store = {
     if (this.getNote(key, id) !== text) day.notes[id] = text;
     this.prune(key);
     this.save();
+  },
+
+  /* ----- To-do lists ----- */
+
+  todos(list) {
+    return this.data.todos[list];
+  },
+
+  todo(list, id) {
+    return this.todos(list).find((t) => t.id === id);
+  },
+
+  addTodo(list, text) {
+    const item = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      text,
+      created: currentDay,
+      doneOn: null,
+    };
+    this.todos(list).push(item);
+    this.save();
+    return item;
+  },
+
+  setTodoDone(list, id, done) {
+    const item = this.todo(list, id);
+    if (!item) return;
+    item.doneOn = done ? currentDay : null;
+    this.save();
+  },
+
+  setTodoText(list, id, text) {
+    const item = this.todo(list, id);
+    if (!item) return;
+    item.text = text;
+    this.save();
+  },
+
+  removeTodo(list, id) {
+    this.data.todos[list] = this.todos(list).filter((t) => t.id !== id);
+    this.save();
+  },
+
+  // Checked items stay (struck through) for the rest of their day and are
+  // gone from the next day on. Unchecked items carry over.
+  purgeTodos(key) {
+    let changed = false;
+    for (const name of TODO_LISTS) {
+      const kept = this.todos(name).filter((t) => !t.doneOn || t.doneOn >= key);
+      if (kept.length !== this.todos(name).length) {
+        this.data.todos[name] = kept;
+        changed = true;
+      }
+    }
+    if (changed) this.save();
   },
 };
 
@@ -397,8 +468,20 @@ function renderNote(li, habit) {
 }
 
 // Tap on the circle = complete. Long press anywhere on the card = edit note.
-// The two never overlap: a fired long press swallows the following click.
 function attachCardGestures(li, habit) {
+  attachPressGestures(li, {
+    inputSelector: '.habit__input',
+    onLongPress: () => openNoteEditor(li, habit),
+    onClick: (e) => {
+      if (e.target.closest('.check')) toggleCard(li, habit);
+    },
+  });
+}
+
+// Shared by habit cards and to-do items. A fired long press swallows the
+// following click, so the two never overlap. The editor it opens is found
+// with inputSelector and focused when the press ends.
+function attachPressGestures(li, { inputSelector, onLongPress, onClick }) {
   let pressTimer = null;
   let longPressed = false;
   let startX = 0;
@@ -411,7 +494,7 @@ function attachCardGestures(li, habit) {
   };
 
   li.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('.habit__input')) return;
+    if (e.target.closest(inputSelector)) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     longPressed = false;
     startX = e.clientX;
@@ -422,7 +505,7 @@ function attachCardGestures(li, habit) {
       pressTimer = null;
       longPressed = true;
       li.classList.remove('is-pressing');
-      openNoteEditor(li, habit);
+      onLongPress();
     }, LONG_PRESS_MS);
   });
 
@@ -434,7 +517,7 @@ function attachCardGestures(li, habit) {
 
   li.addEventListener('pointerup', () => {
     cancelPress();
-    if (longPressed) focusNoteEditor(li);
+    if (longPressed) focusEditor(li, inputSelector);
   });
   li.addEventListener('pointercancel', cancelPress);
   li.addEventListener('pointerleave', cancelPress);
@@ -444,7 +527,7 @@ function attachCardGestures(li, habit) {
   li.addEventListener('touchend', (e) => {
     if (!longPressed) return;
     e.preventDefault(); // also suppresses the synthetic click
-    focusNoteEditor(li);
+    focusEditor(li, inputSelector);
   }, { passive: false });
 
   li.addEventListener('click', (e) => {
@@ -452,7 +535,7 @@ function attachCardGestures(li, habit) {
       longPressed = false;
       return;
     }
-    if (e.target.closest('.check')) toggleCard(li, habit);
+    if (!e.target.closest(inputSelector)) onClick(e);
   });
 
   li.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -518,8 +601,8 @@ function openNoteEditor(li, habit) {
   input.addEventListener('blur', () => close(true));
 }
 
-function focusNoteEditor(li) {
-  const input = li.querySelector('.habit__input');
+function focusEditor(li, inputSelector) {
+  const input = li.querySelector(inputSelector);
   if (input && document.activeElement !== input) {
     input.focus();
     const end = input.value.length;
@@ -604,6 +687,187 @@ function initGrid() {
   });
 }
 
+/* ---------- To Do List ----------
+   Three sections (today, longterm, goals) that behave the same: tap the
+   circle to check/uncheck, long press to edit (empty text deletes),
+   "+ add …" opens an inline input that stays open for the next item. */
+
+function todoSection(list) {
+  return document.querySelector(`.todo-section[data-list="${list}"]`);
+}
+
+function renderTodos() {
+  Store.purgeTodos(currentDay);
+  for (const list of TODO_LISTS) {
+    const ul = todoSection(list).querySelector('.todo-list');
+    ul.replaceChildren(...Store.todos(list).map((item) => createTodo(list, item)));
+  }
+}
+
+function createTodo(list, item) {
+  const li = document.createElement('li');
+  li.className = `todo${item.doneOn ? ' is-done' : ''}`;
+  li.dataset.id = item.id;
+  li.innerHTML = `
+    <button class="check check--sm" type="button">${CHECK_SVG}</button>
+    <span class="todo__text"></span>`;
+  li.querySelector('.todo__text').textContent = item.text;
+  updateTodoLabel(li, item);
+  attachPressGestures(li, {
+    inputSelector: '.todo__input',
+    onLongPress: () => openTodoEditor(li, list),
+    onClick: (e) => {
+      if (e.target.closest('.check')) toggleTodo(li, list);
+    },
+  });
+  return li;
+}
+
+function updateTodoLabel(li, item) {
+  li.querySelector('.check').setAttribute('aria-label',
+    `${item.doneOn ? 'Uncheck' : 'Check'} ${item.text}`);
+}
+
+function toggleTodo(li, list) {
+  const item = Store.todo(list, li.dataset.id);
+  if (!item) return;
+  Store.setTodoDone(list, item.id, !item.doneOn);
+  li.classList.toggle('is-done', !!item.doneOn);
+  updateTodoLabel(li, item);
+}
+
+function openTodoEditor(li, list) {
+  if (li.querySelector('.todo__input')) return;
+  const item = Store.todo(list, li.dataset.id);
+  if (!item) return;
+  const textEl = li.querySelector('.todo__text');
+
+  const input = createTodoInput(item.text);
+  input.setAttribute('aria-label', 'Edit item');
+  textEl.hidden = true;
+  li.appendChild(input);
+  input.focus(); // works on desktop; on iOS the press's touchend focuses it
+
+  let closed = false;
+  const close = (save) => {
+    if (closed) return;
+    closed = true;
+    const text = input.value.trim();
+    if (save && !text) {
+      Store.removeTodo(list, item.id);
+      li.remove();
+      return;
+    }
+    if (save) Store.setTodoText(list, item.id, text);
+    input.remove();
+    textEl.textContent = item.text;
+    textEl.hidden = false;
+    updateTodoLabel(li, item);
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      close(true);
+    } else if (e.key === 'Escape') {
+      close(false);
+    }
+  });
+  input.addEventListener('blur', () => close(true));
+}
+
+function createTodoInput(value = '') {
+  const input = document.createElement('input');
+  input.className = 'todo__input';
+  input.type = 'text';
+  input.value = value;
+  input.setAttribute('enterkeyhint', 'done');
+  input.setAttribute('autocomplete', 'off');
+  return input;
+}
+
+function renderAddButton(addEl) {
+  const btn = document.createElement('button');
+  btn.className = 'todo-add__btn';
+  btn.type = 'button';
+  btn.innerHTML = '<span class="todo-add__plus">+</span> ';
+  btn.append(addEl.dataset.label);
+  addEl.replaceChildren(btn);
+}
+
+function openAddInput(addEl, list) {
+  const row = document.createElement('div');
+  row.className = 'todo-add__row';
+  row.innerHTML = `<span class="check check--sm" aria-hidden="true"></span>`;
+  const input = createTodoInput();
+  input.placeholder = addEl.dataset.label;
+  input.setAttribute('enterkeyhint', 'enter');
+  input.setAttribute('aria-label', addEl.dataset.label);
+  row.appendChild(input);
+  addEl.replaceChildren(row);
+  input.focus(); // inside the tap, so iOS shows the keyboard
+
+  const ul = todoSection(list).querySelector('.todo-list');
+  const add = () => {
+    const text = input.value.trim();
+    if (!text) return false;
+    ul.appendChild(createTodo(list, Store.addTodo(list, text)));
+    input.value = '';
+    return true;
+  };
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    renderAddButton(addEl);
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing) {
+      e.preventDefault();
+      // Saved: stay open for the next one. Empty: done adding.
+      if (!add()) close();
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+  // Tapping outside keeps what was typed, then closes
+  input.addEventListener('blur', () => {
+    add();
+    close();
+  });
+}
+
+function initTodos() {
+  for (const list of TODO_LISTS) {
+    const addEl = todoSection(list).querySelector('.todo-add');
+    renderAddButton(addEl);
+    addEl.addEventListener('click', (e) => {
+      if (e.target.closest('.todo-add__btn')) openAddInput(addEl, list);
+    });
+  }
+}
+
+/* ---------- Tabs ---------- */
+
+function showScreen(name) {
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  for (const screen of document.querySelectorAll('.screen')) {
+    screen.classList.toggle('is-active', screen.id === name);
+  }
+  for (const tab of document.querySelectorAll('.tab')) {
+    const active = tab.dataset.screen === name;
+    tab.classList.toggle('is-active', active);
+    tab.setAttribute('aria-pressed', String(active));
+  }
+}
+
+function initTabs() {
+  document.querySelector('.tabbar').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab');
+    if (tab) showScreen(tab.dataset.screen);
+  });
+}
+
 /* ---------- Day change ---------- */
 
 let midnightTimer = null;
@@ -612,6 +876,7 @@ function renderAll() {
   currentDay = todayKey();
   renderToday();
   renderWeek();
+  renderTodos();
 }
 
 function checkDay() {
@@ -651,6 +916,8 @@ function registerServiceWorker() {
 Store.load();
 initWelcome();
 initGrid();
+initTodos();
+initTabs();
 renderAll();
 initDayWatch();
 registerServiceWorker();
