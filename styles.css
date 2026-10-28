@@ -807,7 +807,7 @@ button {
 
 .todo-section--card {
   --surface: var(--yellow);
-  padding: 24px 30px 21px;
+  padding: 24px 30px 32px;
   border-radius: var(--card-radius);
   background: var(--yellow);
 }
@@ -918,20 +918,25 @@ button {
 }
 
 /* ---------- Goals ----------
-   Mockup sizes, with every row at least 44px tall to tap. */
+   Vertical rhythm measured from the mockup. Gaps are padding at the top of
+   the row below them, so they're part of that row when tapping. */
 
 .todo-section--card .section-title {
-  margin-bottom: 2px;
+  margin-bottom: 0;
 }
 
 .goal__head {
   display: flex;
   align-items: center;
-  min-height: 44px;
+  padding-top: 18.5px; /* between goals */
   font-size: 16px;
   line-height: 20px;
   touch-action: manipulation;
   transition: transform 0.15s ease;
+}
+
+.goal:first-child > .goal__head {
+  padding-top: 11px; /* under the GOALS title */
 }
 
 .goal__head.is-pressing {
@@ -955,7 +960,7 @@ button {
 }
 
 .goal__body {
-  padding-left: 15.5px; /* text lines line up with the title */
+  padding-left: 14.5px; /* text lines line up with the title */
 }
 
 .goal:not(.is-open) > .goal__body {
@@ -966,16 +971,20 @@ button {
   list-style: none;
 }
 
+/* Lines in a group sit 17px apart */
 .block {
   display: flex;
   align-items: center;
   gap: 8.5px;
-  min-height: 44px;
   font-size: 14px;
   font-weight: 300;
-  line-height: 18px;
+  line-height: 17px;
   touch-action: manipulation;
   transition: transform 0.15s ease;
+}
+
+.block:first-child {
+  padding-top: 6px; /* under the goal title */
 }
 
 .block.is-pressing {
@@ -986,21 +995,32 @@ button {
   font-weight: 400;
 }
 
-/* A sub-heading after other lines gets a little more room above */
-.block--regular:not(:first-child) {
-  min-height: 48px;
+/* A sub-heading starts a new group: more room above it, a little below */
+.block--task + .block--regular,
+.block--regular + .block--regular {
+  padding-top: 14px;
+}
+
+.block--text:not(.block--regular) + .block--regular,
+.block--line + .block--regular {
+  padding-top: 6px;
+}
+
+.block--regular + .block {
   padding-top: 4px;
 }
 
 .check--xs {
   width: 14px;
   height: 14px;
-  margin-left: 3px;
+  margin-left: 4px;
   border-width: 1.2px;
 }
 
+/* Bigger hit area: out into the card's margin and up to the text, and the
+   full line height (no further, or it would cover the next line's circle) */
 .check--xs::before {
-  inset: -15px -12px;
+  inset: -1.5px -8.5px -1.5px -24px;
 }
 
 .check--xs svg {
@@ -1013,9 +1033,25 @@ button {
   display: none;
 }
 
-.block .todo__input,
 .goal__head .todo__input {
-  line-height: 18px;
+  line-height: 20px;
+}
+
+/* Typing in a line looks like the 14px text, but the input is 16px (scaled
+   down) so iOS doesn't zoom in on focus */
+.block .todo__input {
+  flex: none;
+  width: 114.2857%;
+  margin: -1.2px -14.2857% -1.2px 0;
+  font-size: 16px;
+  font-weight: inherit;
+  line-height: 19.43px;
+  transform: scale(0.875);
+  transform-origin: 0 50%;
+}
+
+.block .todo__input::placeholder {
+  color: rgba(45, 45, 45, 0.3);
 }
 
 .goal__add {
@@ -1023,17 +1059,38 @@ button {
 }
 
 .goal__add .todo-add__btn {
+  min-height: 0;
   margin: 0;
-  padding-left: 3px;
+  padding: 4px 0 0 4px;
   font-size: 14px;
   font-weight: 300;
-  line-height: 18px;
+  line-height: 17px;
 }
 
-.goal__add .todo-add__row {
-  align-items: center;
-  min-height: 44px;
-  padding: 0;
+/* A line is open: it takes the place of "+ add a note" */
+.goal.is-writing .goal__add {
+  display: none;
+}
+
+.todo-section--card > .todo-add {
+  margin-top: 19px;
+}
+
+/* The mockup's plus: a 9px cross with 1px lines, 6.5px before the text */
+.todo-section--card .todo-add__plus {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 2.5px; /* + the space after it */
+  background:
+    linear-gradient(currentColor, currentColor) center / 1px 100% no-repeat,
+    linear-gradient(currentColor, currentColor) center / 100% 1px no-repeat;
+  font-size: 0;
+  vertical-align: -1px;
+}
+
+.goal__add .todo-add__plus {
+  vertical-align: 1px;
 }
 
 /* ---------- Drag and drop ---------- */

@@ -1272,7 +1272,7 @@ function openInlineEditor(host, textEl, value, save) {
   textEl.hidden = true;
   host.classList.add('is-editing');
   textEl.after(input);
-  input.focus(); // works on desktop; on iOS the press's touchend focuses it
+  focusEnd(input); // works on desktop; on iOS the press's touchend focuses it
 
   let closed = false;
   const close = (keep) => {
@@ -1437,7 +1437,9 @@ function createGoal(goal) {
   const addEl = li.querySelector('.goal__add');
   renderAddButton(addEl);
   addEl.addEventListener('click', (e) => {
-    if (e.target.closest('.todo-add__btn')) openAddInput(addEl, (raw) => addBlock(li, raw), { circle: false });
+    if (!e.target.closest('.todo-add__btn')) return;
+    const blocks = li.querySelectorAll('.goal__blocks > .block[data-id]');
+    openLine(li, blocks[blocks.length - 1] || null);
   });
 
   const head = li.querySelector('.goal__head');
@@ -1472,10 +1474,18 @@ function updateGoal(li) {
 // After its blocks changed: a goal that got done (or undone) moves, once
 // the checkmark has been seen
 function refreshGoal(li, delay = 0) {
-  if (!Store.updateGoalDone(li.dataset.id)) return;
+  if (Store.updateGoalDone(li.dataset.id)) placeGoal(li, delay);
+}
+
+function placeGoal(li, delay) {
   clearTimeout(li._placeTimer);
   li._placeTimer = setTimeout(() => {
-    if (!li.isConnected || Drag.active) return;
+    if (!li.isConnected) return;
+    // Not mid-drag or while writing in it: moving it would close the input
+    if (Drag.active || li.querySelector('.todo__input')) {
+      placeGoal(li, 300);
+      return;
+    }
     const ul = goalsUl();
     const byId = new Map([...ul.children].map((g) => [g.dataset.id, g]));
     const nodes = orderedGoals().map((g) => byId.get(g.id)).filter(Boolean);
@@ -1527,15 +1537,19 @@ function createBlock(goalLi, item) {
   return li;
 }
 
-function addBlock(goalLi, raw) {
-  const block = parseBlock(raw);
-  if (!block.text) return false;
+// The goal's blocks in screen order (lines being typed have no id yet)
+function blockIds(goalLi) {
+  return [...goalLi.querySelectorAll('.goal__blocks > .block[data-id]')].map((b) => b.dataset.id);
+}
+
+// Saves a parsed line as a new block just before `beforeEl` (the line input)
+function insertBlock(goalLi, beforeEl, block) {
   const item = Store.addTodo('goals', block.text, {
     parentId: goalLi.dataset.id, type: block.type, weight: block.weight,
   });
-  goalLi.querySelector('.goal__blocks').appendChild(createBlock(goalLi, item));
+  beforeEl.before(createBlock(goalLi, item));
+  Store.reposition('goals', item.id, blockIds(goalLi));
   refreshGoal(goalLi);
-  return true;
 }
 
 function toggleBlock(goalLi, li) {
@@ -1547,13 +1561,152 @@ function toggleBlock(goalLi, li) {
   refreshGoal(goalLi, COMPLETE_DELAY_MS);
 }
 
+/* ----- Writing lines (Notion-like) -----
+   New lines and edited blocks share the same keys:
+     Enter      saves the line and opens a new one below it; after a task
+                the new line starts with "[] ", so lists continue
+     Enter on a bare prefix ("[] ", "# ") drops the prefix; on an empty
+                line it closes
+     Backspace  on an empty line removes it and continues at the end of
+                the line above
+     Paste      several lines: one block per line, each with its prefix
+   The next input is always focused before the old one is removed, so
+   the iPhone keyboard stays up. */
+
+const LINE_HINT = 'Text · # bold · [] task';
+
+const continuation = (block) => (block.type === 'task' ? '[] ' : '');
+
+function createLineInput(value) {
+  const input = createTodoInput(value);
+  input.placeholder = LINE_HINT;
+  input.setAttribute('enterkeyhint', 'enter');
+  input.setAttribute('aria-label', 'Note');
+  return input;
+}
+
+function focusEnd(input) {
+  input.focus();
+  const end = input.value.length;
+  input.setSelectionRange(end, end);
+}
+
+// keys: { enter, backspace (on an empty line), paste(lines), escape }
+function attachLineKeys(input, keys) {
+  input.addEventListener('keydown', (e) => {
+    if (e.isComposing) return;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      keys.enter();
+    } else if (e.key === 'Backspace' && input.value === '') {
+      e.preventDefault();
+      keys.backspace();
+    } else if (e.key === 'Escape') {
+      keys.escape();
+    }
+  });
+  input.addEventListener('paste', (e) => {
+    const text = e.clipboardData ? e.clipboardData.getData('text') : '';
+    if (!/[\r\n]/.test(text)) return;
+    e.preventDefault();
+    const { selectionStart: from, selectionEnd: to, value } = input;
+    keys.paste((value.slice(0, from) + text + value.slice(to)).split(/\r?\n/));
+  });
+}
+
+function closeLineIn(goalLi, li) {
+  li.remove();
+  goalLi.classList.toggle('is-writing', !!goalLi.querySelector('.block--line'));
+}
+
+// A new line after prevEl (a block, or null for the top). Returns
+// { paste(lines) } so an edited block can hand pasted lines over.
+function openLine(goalLi, prevEl, value = '') {
+  const existing = goalLi.querySelector('.block--line');
+  if (existing && !prevEl) {
+    focusEnd(existing.querySelector('input'));
+    return null;
+  }
+  const li = document.createElement('li');
+  li.className = 'block block--line';
+  const input = createLineInput(value);
+  li.appendChild(input);
+  if (prevEl) prevEl.after(li);
+  else goalLi.querySelector('.goal__blocks').prepend(li);
+  goalLi.classList.add('is-writing');
+  focusEnd(input); // inside the tap or key press, so iOS shows the keyboard
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    closeLineIn(goalLi, li);
+  };
+  const paste = (lines) => {
+    let last = null;
+    for (const line of lines) {
+      const block = parseBlock(line);
+      if (!block.text) continue;
+      insertBlock(goalLi, li, block);
+      last = block;
+    }
+    input.value = last ? continuation(last) : '';
+    focusEnd(input);
+  };
+
+  attachLineKeys(input, {
+    enter: () => {
+      if (!input.value.trim()) {
+        close();
+        return;
+      }
+      const block = parseBlock(input.value);
+      if (block.text) insertBlock(goalLi, li, block);
+      input.value = block.text ? continuation(block) : ''; // bare prefix: dropped
+      focusEnd(input);
+    },
+    backspace: () => {
+      const prev = li.previousElementSibling;
+      closed = true; // the blur below must not save
+      if (prev && prev.dataset.id) openBlockEditor(goalLi, prev);
+      closeLineIn(goalLi, li);
+    },
+    paste,
+    escape: close,
+  });
+  // Tapping outside keeps what was typed
+  input.addEventListener('blur', () => {
+    if (closed) return;
+    const block = parseBlock(input.value);
+    if (block.text) insertBlock(goalLi, li, block);
+    close();
+  });
+  return { paste };
+}
+
 // Editing shows the prefix, so the type can be changed by adding or
-// removing it. A task that becomes text loses its checkmark.
+// removing it. A task that becomes text loses its checkmark. Clearing the
+// line and saving deletes the block.
 function openBlockEditor(goalLi, li) {
+  if (li.querySelector('.todo__input')) return;
   const item = Store.todo('goals', li.dataset.id);
   if (!item) return;
-  openInlineEditor(li, li.querySelector('.todo__text'), blockSource(item), (raw) => {
-    const block = parseBlock(raw);
+  const textEl = li.querySelector('.todo__text');
+  const input = createLineInput(blockSource(item));
+  textEl.hidden = true;
+  li.classList.add('is-editing');
+  textEl.after(input);
+  focusEnd(input); // works on desktop; on iOS the press's touchend focuses it
+
+  let closed = false;
+  const finish = (save) => {
+    if (closed) return;
+    closed = true;
+    input.remove(); // may fire blur; `closed` makes that a no-op
+    textEl.hidden = false;
+    li.classList.remove('is-editing');
+    if (!save) return;
+    const block = parseBlock(input.value);
     if (!block.text) {
       Store.removeTodo('goals', item.id);
       li.remove();
@@ -1564,7 +1717,37 @@ function openBlockEditor(goalLi, li) {
       li.replaceWith(createBlock(goalLi, item));
     }
     refreshGoal(goalLi);
+  };
+
+  attachLineKeys(input, {
+    enter: () => {
+      if (!input.value.trim()) {
+        finish(true); // deletes the block
+        return;
+      }
+      const block = parseBlock(input.value);
+      if (!block.text) {
+        input.value = ''; // bare prefix: dropped
+        return;
+      }
+      openLine(goalLi, li, continuation(block));
+      finish(true);
+    },
+    backspace: () => {
+      const prev = li.previousElementSibling;
+      if (prev && prev.dataset.id) openBlockEditor(goalLi, prev);
+      finish(true); // empty: deletes this block
+    },
+    // This block takes the first line, the rest become new blocks after it
+    paste: ([first, ...rest]) => {
+      input.value = first;
+      const line = openLine(goalLi, li);
+      finish(true);
+      line.paste(rest);
+    },
+    escape: () => finish(false),
   });
+  input.addEventListener('blur', () => finish(true));
 }
 
 /* ---------- Drag and drop ----------
@@ -1706,7 +1889,8 @@ const Drag = {
     }
     setTimeout(() => a.siblings.forEach((s) => { s.style.transition = ''; }), DRAG_SETTLE_MS);
 
-    if (a.to !== a.from) a.cfg.onDrop(order.slice(a.min).map((s) => s.dataset.id));
+    // Lines still being typed have no id yet and don't count
+    if (a.to !== a.from) a.cfg.onDrop(order.slice(a.min).map((s) => s.dataset.id).filter(Boolean));
   },
 };
 
