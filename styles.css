@@ -387,13 +387,15 @@ button {
 }
 
 .habit.is-done .check,
-.todo.is-done .check {
+.todo.is-done .check,
+.block.is-done .check {
   border-color: var(--orange);
   background: var(--orange);
 }
 
 .habit.is-done .check svg,
-.todo.is-done .check svg {
+.todo.is-done .check svg,
+.block.is-done .check svg {
   opacity: 1;
   transform: scale(1);
 }
@@ -789,6 +791,7 @@ button {
 /* ---------- To Do List ---------- */
 
 .todo-section {
+  --surface: var(--bg); /* behind a lifted (dragged) item */
   width: min(339px, 100% - 32px);
   margin: 80px auto 0;
   padding: 0 4px;
@@ -803,6 +806,7 @@ button {
 }
 
 .todo-section--card {
+  --surface: var(--yellow);
   padding: 24px 30px 21px;
   border-radius: var(--card-radius);
   background: var(--yellow);
@@ -856,7 +860,9 @@ button {
   transition: color 0.15s ease, text-decoration-color 0.15s ease;
 }
 
-.todo.is-done .todo__text {
+.todo.is-done .todo__text,
+.block.is-done .todo__text,
+.goal.is-done > .goal__head .todo__text {
   color: var(--orange);
   text-decoration-color: var(--orange);
 }
@@ -909,4 +915,139 @@ button {
 .todo-add__row .check--sm {
   opacity: 0.35;
   cursor: default;
+}
+
+/* ---------- Goals ----------
+   Mockup sizes, with every row at least 44px tall to tap. */
+
+.todo-section--card .section-title {
+  margin-bottom: 2px;
+}
+
+.goal__head {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  font-size: 16px;
+  line-height: 20px;
+  touch-action: manipulation;
+  transition: transform 0.15s ease;
+}
+
+.goal__head.is-pressing {
+  transform: scale(0.98);
+}
+
+.goal__chevron {
+  flex: none;
+  width: 15.5px; /* title starts 15.5px in */
+}
+
+.goal__chevron svg {
+  display: block;
+  width: 8px;
+  height: 8px;
+  transition: transform 0.2s ease;
+}
+
+.goal.is-open .goal__chevron svg {
+  transform: rotate(90deg);
+}
+
+.goal__body {
+  padding-left: 15.5px; /* text lines line up with the title */
+}
+
+.goal:not(.is-open) > .goal__body {
+  display: none;
+}
+
+.goal__blocks {
+  list-style: none;
+}
+
+.block {
+  display: flex;
+  align-items: center;
+  gap: 8.5px;
+  min-height: 44px;
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 18px;
+  touch-action: manipulation;
+  transition: transform 0.15s ease;
+}
+
+.block.is-pressing {
+  transform: scale(0.98);
+}
+
+.block--regular {
+  font-weight: 400;
+}
+
+/* A sub-heading after other lines gets a little more room above */
+.block--regular:not(:first-child) {
+  min-height: 48px;
+  padding-top: 4px;
+}
+
+.check--xs {
+  width: 14px;
+  height: 14px;
+  margin-left: 3px;
+  border-width: 1.2px;
+}
+
+.check--xs::before {
+  inset: -15px -12px;
+}
+
+.check--xs svg {
+  width: 8px;
+  height: 8px;
+}
+
+/* While editing, the prefix ("[] ", "# ") shows the type */
+.block.is-editing .check {
+  display: none;
+}
+
+.block .todo__input,
+.goal__head .todo__input {
+  line-height: 18px;
+}
+
+.goal__add {
+  margin-top: 0;
+}
+
+.goal__add .todo-add__btn {
+  margin: 0;
+  padding-left: 3px;
+  font-size: 14px;
+  font-weight: 300;
+  line-height: 18px;
+}
+
+.goal__add .todo-add__row {
+  align-items: center;
+  min-height: 44px;
+  padding: 0;
+}
+
+/* ---------- Drag and drop ---------- */
+
+.is-lifted {
+  position: relative;
+  z-index: 3;
+  border-radius: 10px;
+  background: var(--surface);
+  /* The first shadow widens the background past the text */
+  box-shadow: 0 0 0 8px var(--surface), 0 12px 28px 6px rgba(45, 45, 45, 0.14);
+}
+
+.is-dragging,
+.is-dragging * {
+  cursor: grabbing !important;
 }

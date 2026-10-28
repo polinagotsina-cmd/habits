@@ -1,6 +1,6 @@
 # Jade! database
 
-Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, then `3_security.sql`.
+Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, then `4_goals.sql`.
 
 ## Connecting
 
@@ -59,14 +59,43 @@ A note carries over to later days until the day after the habit is done. To find
 |---|---|---|
 | `id` | text | key |
 | `list` | text | `today`, `longterm` or `goals` |
-| `parent_id` | text, null | for goal sub-tasks: the goal's `id` (not used by the app yet) |
-| `text` | text | |
-| `position` | float | order within the list, ascending |
+| `parent_id` | text, null | `null` for to-dos and goals; for a goal's block: the goal's `id` |
+| `text` | text | shown without any prefix |
+| `type` | text | `task` (has a checkbox) or `text` (a plain line). Default `task` |
+| `weight` | text | `thin` or `regular` (a sub-heading, e.g. "Phase 1"). Default `thin` |
+| `position` | float | order among its siblings (same `list` and `parent_id`), ascending |
 | `created_on` | date | |
 | `done_on` | date, null | day it was checked; `null` = open |
+| `done_at` | timestamptz, null | moment it was checked; set it together with `done_on` |
 | `deleted` | bool | removed by the user |
 
-The app shows a checked item until the end of its `done_on` day. After that, it disappears from the app but stays in the table as history. To add a task, insert a row with a new `id`, `deleted = false`, `done_on = null`, and a `position` greater than the others in its list.
+**Today and Long term** (`list` = `today` / `longterm`): checked items are listed first, latest `done_at` first, then the open ones by `position`. The app shows a checked item until the end of its `done_on` day. After that, it disappears from the app but stays in the table as history. To add a task, insert a row with a new `id`, `deleted = false`, `done_on = null`, and a `position` greater than the others in its list.
+
+### Goals and their steps
+Goals live in `todos` too, with `list = 'goals'`:
+- **A goal** is a row with `parent_id = null`. Its `text` is the headline. `type` and `weight` don't matter for it.
+- **Its blocks** are rows with `parent_id` = the goal's `id`, shown under it in `position` order:
+
+  | what it looks like | `type` | `weight` | typed in the app as |
+  |---|---|---|---|
+  | a task with a checkbox | `task` | `thin` | `[] Book the exam` |
+  | a sub-heading (phase) | `text` | `regular` | `# Phase 1` |
+  | a plain note line | `text` | `thin` | `Milan · Sep 2027` |
+
+  Phases are just `regular` text lines: a task "belongs" to the phase above it in `position` order.
+- **A goal is done** when it has at least one task and all its tasks are checked. The app then sets the goal's `done_on`/`done_at`, and puts it at the top, struck through. It stays there; unchecking a task clears them again. A goal without tasks is never done. Don't set a goal's `done_on` yourself: check its tasks.
+- Goals and their blocks never disappear by date. (Old goals checked before blocks existed have `done_on` but no `done_at`; they disappear the next day like to-dos.)
+
+To **add a step** to a goal, insert a block:
+```python
+sb.table("todos").insert({
+    "id": str(uuid.uuid4()), "list": "goals", "parent_id": GOAL_ID,
+    "type": "task", "weight": "thin", "text": "Book the exam",
+    "position": LAST_POSITION + 1,  # max position among the goal's blocks, + 1
+    "created_on": "2026-10-28", "deleted": False,
+}).execute()
+```
+To put it between two blocks, use the average of their positions. To check a task, update `done_on` (the day) and `done_at` (now) along with `updated_at`.
 
 ### Common columns
 | column | type | |

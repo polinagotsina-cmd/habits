@@ -8,10 +8,14 @@
        habits: [{ id, name, position, archived }],
        days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } },
        todos: { today: [item], longterm: [item], goals: [item] },
+       ui: { openGoals: [id] },   // this device only, not synced
        sync: { pending: { key: { table, row } }, cursor, user }
      }
    item = { id, text, created: "YYYY-MM-DD", doneOn: "YYYY-MM-DD" | null,
-            position, parentId }.
+            doneAt: ISO time | null, position, parentId,
+            type: "task" | "text", weight: "thin" | "regular" }.
+   In the goals list, items without a parentId are goals; the others are
+   that goal's blocks (text lines and tasks).
    Every change also goes through Sync.queue (sync.js) to Supabase; this
    local copy is what the app renders, so it opens instantly and offline.
    Older versions are upgraded on load by adding fields; nothing is lost.
@@ -31,6 +35,7 @@ let HABITS = []; // active habits in display order, see refreshHabits()
 
 const STORAGE_KEY = 'habits.v1'; // name kept so existing data stays put
 const TODO_LISTS = ['today', 'longterm', 'goals'];
+const TASK_LISTS = ['today', 'longterm']; // plain lists; goals are their own thing
 const WELCOME_MS = 1500;
 const LONG_PRESS_MS = 500;
 const LONG_PRESS_MOVE_PX = 10;
@@ -131,8 +136,13 @@ const Store = {
       d.todos[name].forEach((item, i) => {
         if (typeof item.position !== 'number') item.position = i;
         if (item.parentId === undefined) item.parentId = null;
+        if (item.doneAt === undefined) item.doneAt = null;
+        if (!item.type) item.type = 'task';
+        if (!item.weight) item.weight = 'thin';
       });
     }
+    if (!d.ui || typeof d.ui !== 'object') d.ui = {};
+    if (!Array.isArray(d.ui.openGoals)) d.ui.openGoals = [];
     if (!Array.isArray(d.habits)) {
       d.habits = DEFAULT_HABITS.map((h, i) => ({ ...h, position: i, archived: false }));
     }
@@ -221,14 +231,20 @@ const Store = {
     return this.todos(list).find((t) => t.id === id);
   },
 
-  addTodo(list, text) {
+  // fields: parentId (a goal's id, for its blocks), type, weight
+  addTodo(list, text, fields = {}) {
+    const parentId = fields.parentId || null;
+    const siblings = this.todos(list).filter((t) => t.parentId === parentId);
     const item = {
       id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
       text,
       created: currentDay,
       doneOn: null,
-      position: Math.max(-1, ...this.todos(list).map((t) => t.position)) + 1,
-      parentId: null,
+      doneAt: null,
+      position: Math.max(-1, ...siblings.map((t) => t.position)) + 1,
+      parentId,
+      type: fields.type || 'task',
+      weight: fields.weight || 'thin',
     };
     this.todos(list).push(item);
     Sync.queue('todos', Rows.todo(list, item));
@@ -240,32 +256,108 @@ const Store = {
     const item = this.todo(list, id);
     if (!item) return;
     item.doneOn = done ? currentDay : null;
+    item.doneAt = done ? new Date().toISOString() : null;
     Sync.queue('todos', Rows.todo(list, item));
     this.save();
   },
 
-  setTodoText(list, id, text) {
+  // fields: any of text, type, weight, doneOn, doneAt
+  updateTodo(list, id, fields) {
     const item = this.todo(list, id);
     if (!item) return;
-    item.text = text;
+    Object.assign(item, fields);
     Sync.queue('todos', Rows.todo(list, item));
     this.save();
   },
 
+  // Removing a goal removes its blocks too
   removeTodo(list, id) {
-    const item = this.todo(list, id);
-    if (item) Sync.queue('todos', Rows.todo(list, item, true));
-    this.data.todos[list] = this.todos(list).filter((t) => t.id !== id);
+    const gone = this.todos(list).filter((t) => t.id === id || t.parentId === id);
+    for (const item of gone) Sync.queue('todos', Rows.todo(list, item, true));
+    this.data.todos[list] = this.todos(list).filter((t) => !gone.includes(t));
     this.save();
   },
 
-  // Checked items stay (struck through) for the rest of their day and are
-  // gone from the next day on. Unchecked items carry over. Local only: the
-  // server keeps them as history.
+  // Gives `id` a position between its neighbours in `ids` (the new order of
+  // the items it was dragged among), so only one row changes. Equal
+  // positions (old data) leave no room in between: then renumber them all.
+  reposition(list, id, ids) {
+    const items = ids.map((x) => this.todo(list, x));
+    const i = ids.indexOf(id);
+    if (i < 0 || items.some((t) => !t)) return;
+    const prev = items[i - 1];
+    const next = items[i + 1];
+    let pos;
+    if (prev && next) pos = (prev.position + next.position) / 2;
+    else if (prev) pos = prev.position + 1;
+    else if (next) pos = next.position - 1;
+    else return;
+    if ((prev && pos <= prev.position) || (next && pos >= next.position)) {
+      items.forEach((t, k) => {
+        if (t.position === k) return;
+        t.position = k;
+        Sync.queue('todos', Rows.todo(list, t));
+      });
+    } else {
+      items[i].position = pos;
+      Sync.queue('todos', Rows.todo(list, items[i]));
+    }
+    this.save();
+  },
+
+  /* ----- Goals ----- */
+
+  goals() {
+    return this.todos('goals').filter((t) => !t.parentId);
+  },
+
+  blocks(goalId) {
+    return this.todos('goals').filter((t) => t.parentId === goalId).sort(byPosition);
+  },
+
+  isGoalOpen(id) {
+    return this.data.ui.openGoals.includes(id);
+  },
+
+  setGoalOpen(id, open) {
+    const ids = this.data.ui.openGoals.filter((x) => x !== id);
+    if (open) ids.push(id);
+    this.data.ui.openGoals = ids;
+    this.save();
+  },
+
+  // A goal is done when it has at least one task and all of them are
+  // checked. Stored on the goal (done_on/done_at) so other clients see it.
+  // Returns whether it changed; a goal that just got done is closed.
+  updateGoalDone(id) {
+    const goal = this.todo('goals', id);
+    if (!goal || goal.parentId) return false;
+    const tasks = this.blocks(id).filter((b) => b.type === 'task');
+    if (!tasks.length && isLegacyDone(goal)) return false; // see isExpired
+    const done = tasks.length > 0 && tasks.every((t) => t.doneOn);
+    if (done === !!goal.doneOn) return false;
+    goal.doneOn = done ? currentDay : null;
+    goal.doneAt = done ? new Date().toISOString() : null;
+    if (done) this.setGoalOpen(id, false);
+    Sync.queue('todos', Rows.todo('goals', goal));
+    this.save();
+    return true;
+  },
+
+  // After pulled changes: tasks may have changed on another device
+  updateGoals() {
+    for (const goal of this.goals()) this.updateGoalDone(goal.id);
+    const ids = new Set(this.goals().map((g) => g.id));
+    this.data.ui.openGoals = this.data.ui.openGoals.filter((id) => ids.has(id));
+  },
+
+  // Today and Long term: checked items stay for the rest of their day and
+  // are gone from the next day on; unchecked ones carry over. Goals and
+  // their blocks stay. Local only: the server keeps them as history.
   purgeTodos(key) {
     let changed = false;
     for (const name of TODO_LISTS) {
-      const kept = this.todos(name).filter((t) => !t.doneOn || t.doneOn >= key);
+      const kept = this.todos(name).filter((t) => !isExpired(name, t, key));
       if (kept.length !== this.todos(name).length) {
         this.data.todos[name] = kept;
         changed = true;
@@ -274,6 +366,22 @@ const Store = {
     if (changed) this.save();
   },
 };
+
+const byPosition = (a, b) => a.position - b.position;
+// Most recently checked first (items checked before done_at existed last)
+const byLatestDone = (a, b) => (b.doneAt || '').localeCompare(a.doneAt || '') || byPosition(a, b);
+
+// Before goals had tasks, a goal was checked like a to-do (no done_at) and
+// disappeared the next day. Those keep doing that.
+function isLegacyDone(item) {
+  return !item.parentId && !!item.doneOn && !item.doneAt;
+}
+
+// Gone from the app from the day after it was checked
+function isExpired(list, item, today) {
+  if (!item.doneOn || item.doneOn >= today) return false;
+  return list !== 'goals' || isLegacyDone(item);
+}
 
 /* ---------- State & elements ---------- */
 
@@ -455,9 +563,10 @@ function flipTargets() {
   return targets;
 }
 
-function flip(mutate) {
+// targets: everything that can shift, top to bottom (default: the Today list)
+function flip(mutate, targets = flipTargets) {
   const before = new Map();
-  for (const el of flipTargets()) {
+  for (const el of targets()) {
     before.set(el, el.getBoundingClientRect().top); // visual position, mid-slide included
     if (el._flip) el._flip.cancel();
   }
@@ -465,7 +574,7 @@ function flip(mutate) {
   mutate();
 
   let moved = 0;
-  for (const el of flipTargets()) {
+  for (const el of targets()) {
     if (!before.has(el)) continue; // newly inserted: fades in instead
     const dy = before.get(el) - el.getBoundingClientRect().top;
     if (Math.abs(dy) < 0.5) continue;
@@ -530,59 +639,98 @@ function attachCardGestures(li, habit) {
   });
 }
 
-// Shared by habit cards and to-do items. A fired long press swallows the
-// following click, so the two never overlap. The editor it opens is found
-// with inputSelector and focused when the press ends.
-function attachPressGestures(li, { inputSelector, onLongPress, onClick }) {
+// Shared by habit cards, to-do items and goals. A fired long press swallows
+// the following click, so the two never overlap. The editor it opens is
+// found with inputSelector and focused when the press ends.
+// drag (optional): returns a Drag config, or false when the item can't move
+// right now. With one, the long press waits: moving drags, releasing in
+// place opens the editor.
+function attachPressGestures(el, { inputSelector, onLongPress, onClick, drag }) {
   let pressTimer = null;
   let longPressed = false;
+  let held = null; // the Drag config while held, before moving
   let startX = 0;
   let startY = 0;
 
   const cancelPress = () => {
     clearTimeout(pressTimer);
     pressTimer = null;
-    li.classList.remove('is-pressing');
+    el.classList.remove('is-pressing');
+  };
+  const setHeld = (cfg) => {
+    held = cfg;
+    el.classList.toggle('is-held', !!cfg); // pulled changes wait for it (onRemoteChange)
   };
 
-  li.addEventListener('pointerdown', (e) => {
+  el.addEventListener('pointerdown', (e) => {
     if (e.target.closest(inputSelector)) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     longPressed = false;
+    setHeld(null);
     startX = e.clientX;
     startY = e.clientY;
     cancelPress();
-    li.classList.add('is-pressing');
+    el.classList.add('is-pressing');
+    const { pointerId } = e;
     pressTimer = setTimeout(() => {
       pressTimer = null;
       longPressed = true;
-      li.classList.remove('is-pressing');
-      onLongPress();
+      el.classList.remove('is-pressing');
+      setHeld(drag ? drag() : null);
+      if (!held) {
+        onLongPress();
+        return;
+      }
+      // Keep getting this pointer's events when it leaves the item
+      try { el.setPointerCapture(pointerId); } catch (err) { /* already up */ }
     }, LONG_PRESS_MS);
   });
 
-  li.addEventListener('pointermove', (e) => {
-    if (pressTimer && Math.hypot(e.clientX - startX, e.clientY - startY) > LONG_PRESS_MOVE_PX) {
-      cancelPress();
+  const moveTo = (e, x, y) => {
+    const moved = Math.hypot(x - startX, y - startY) > LONG_PRESS_MOVE_PX;
+    if (pressTimer && moved) cancelPress();
+    if (held && moved) {
+      const cfg = held;
+      setHeld(null);
+      Drag.start(cfg, e, startY);
     }
-  });
+  };
+  el.addEventListener('pointermove', (e) => moveTo(e, e.clientX, e.clientY));
 
-  li.addEventListener('pointerup', () => {
+  // While held, a finger move must drag rather than scroll. preventDefault
+  // here is what stops iOS from scrolling (and cancelling the pointer).
+  el.addEventListener('touchmove', (e) => {
+    if (!held && !Drag.active) return;
+    e.preventDefault();
+    const t = e.touches[0];
+    if (held && t) moveTo(e, t.clientX, t.clientY);
+  }, { passive: false });
+
+  el.addEventListener('pointerup', () => {
     cancelPress();
-    if (longPressed) focusEditor(li, inputSelector);
+    if (held) {
+      setHeld(null);
+      onLongPress();
+    }
+    if (longPressed) focusEditor(el, inputSelector);
   });
-  li.addEventListener('pointercancel', cancelPress);
-  li.addEventListener('pointerleave', cancelPress);
+  el.addEventListener('pointercancel', () => {
+    cancelPress();
+    setHeld(null);
+  });
+  el.addEventListener('pointerleave', () => {
+    if (!held) cancelPress();
+  });
 
   // iOS only shows the keyboard when focus() runs inside a user gesture,
   // so focus the editor on the touchend that finishes the long press.
-  li.addEventListener('touchend', (e) => {
+  el.addEventListener('touchend', (e) => {
     if (!longPressed) return;
     e.preventDefault(); // also suppresses the synthetic click
-    focusEditor(li, inputSelector);
+    focusEditor(el, inputSelector);
   }, { passive: false });
 
-  li.addEventListener('click', (e) => {
+  el.addEventListener('click', (e) => {
     if (longPressed) {
       longPressed = false;
       return;
@@ -590,7 +738,7 @@ function attachPressGestures(li, { inputSelector, onLongPress, onClick }) {
     if (!e.target.closest(inputSelector)) onClick(e);
   });
 
-  li.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
 }
 
 function toggleCard(li, habit) {
@@ -1005,20 +1153,48 @@ function initStats() {
 }
 
 /* ---------- To Do List ----------
-   Three sections (today, longterm, goals) that behave the same: tap the
-   circle to check/uncheck, long press to edit (empty text deletes),
-   "+ add …" opens an inline input that stays open for the next item. */
+   Today and Long term: tap the circle to check/uncheck. Checked items move
+   to the top of their section, latest first, and are gone the next day.
+   Long press to edit (empty text deletes), or long press and move to drag.
+   "+ add …" opens an inline input that stays open for the next item.
+   Goals have their own section below. */
 
 function todoSection(list) {
   return document.querySelector(`.todo-section[data-list="${list}"]`);
 }
 
+function todoUl(list) {
+  return todoSection(list).querySelector('.todo-list');
+}
+
+// Checked items pinned at the top, then the rest in their own order
+function orderedTodos(list) {
+  const items = Store.todos(list);
+  return [...items.filter((t) => t.doneOn).sort(byLatestDone), ...items.filter((t) => !t.doneOn).sort(byPosition)];
+}
+
 function renderTodos() {
   Store.purgeTodos(currentDay);
-  for (const list of TODO_LISTS) {
-    const ul = todoSection(list).querySelector('.todo-list');
-    ul.replaceChildren(...Store.todos(list).map((item) => createTodo(list, item)));
+  Store.updateGoals();
+  for (const list of TASK_LISTS) {
+    todoUl(list).replaceChildren(...orderedTodos(list).map((item) => createTodo(list, item)));
   }
+  renderGoals();
+}
+
+// Moves only the nodes that are out of place, so an input inside one of the
+// others keeps its focus
+function reorderChildren(parent, nodes) {
+  nodes.forEach((node, i) => {
+    if (parent.children[i] !== node) parent.insertBefore(node, parent.children[i] || null);
+  });
+}
+
+// Checked items pinned at the top of ul: where dragging can't go
+function pinnedCount(ul) {
+  let n = 0;
+  while (ul.children[n] && ul.children[n].classList.contains('is-done')) n++;
+  return n;
 }
 
 function createTodo(list, item) {
@@ -1036,6 +1212,11 @@ function createTodo(list, item) {
     onClick: (e) => {
       if (e.target.closest('.check')) toggleTodo(li, list);
     },
+    drag: () => !li.classList.contains('is-done') && {
+      el: li,
+      min: pinnedCount(li.parentElement),
+      onDrop: (ids) => Store.reposition(list, li.dataset.id, ids),
+    },
   });
   return li;
 }
@@ -1045,41 +1226,62 @@ function updateTodoLabel(li, item) {
     `${item.doneOn ? 'Uncheck' : 'Check'} ${item.text}`);
 }
 
+// The item moves (to the top, or back among the unchecked) once the
+// checkmark has been seen; quick taps on several items move them together.
 function toggleTodo(li, list) {
   const item = Store.todo(list, li.dataset.id);
   if (!item) return;
   Store.setTodoDone(list, item.id, !item.doneOn);
   li.classList.toggle('is-done', !!item.doneOn);
   updateTodoLabel(li, item);
+  const ul = todoUl(list);
+  clearTimeout(ul._placeTimer);
+  ul._placeTimer = setTimeout(() => placeTodos(list), COMPLETE_DELAY_MS);
+}
+
+function placeTodos(list) {
+  if (Drag.active) return; // the drop puts everything in place
+  const ul = todoUl(list);
+  const byId = new Map([...ul.children].map((li) => [li.dataset.id, li]));
+  const nodes = orderedTodos(list).map((t) => byId.get(t.id)).filter(Boolean);
+  flip(() => reorderChildren(ul, nodes), () => [...ul.children]);
 }
 
 function openTodoEditor(li, list) {
-  if (li.querySelector('.todo__input')) return;
   const item = Store.todo(list, li.dataset.id);
   if (!item) return;
   const textEl = li.querySelector('.todo__text');
-
-  const input = createTodoInput(item.text);
-  input.setAttribute('aria-label', 'Edit item');
-  textEl.hidden = true;
-  li.appendChild(input);
-  input.focus(); // works on desktop; on iOS the press's touchend focuses it
-
-  let closed = false;
-  const close = (save) => {
-    if (closed) return;
-    closed = true;
-    const text = input.value.trim();
-    if (save && !text) {
+  openInlineEditor(li, textEl, item.text, (text) => {
+    if (!text) {
       Store.removeTodo(list, item.id);
       li.remove();
       return;
     }
-    if (save) Store.setTodoText(list, item.id, text);
-    input.remove();
+    Store.updateTodo(list, item.id, { text });
     textEl.textContent = item.text;
-    textEl.hidden = false;
     updateTodoLabel(li, item);
+  });
+}
+
+// Swaps textEl for an input inside host until Enter, Escape or a tap
+// outside. save(text) gets the trimmed text; empty means delete.
+function openInlineEditor(host, textEl, value, save) {
+  if (host.querySelector('.todo__input')) return;
+  const input = createTodoInput(value);
+  input.setAttribute('aria-label', 'Edit item');
+  textEl.hidden = true;
+  host.classList.add('is-editing');
+  textEl.after(input);
+  input.focus(); // works on desktop; on iOS the press's touchend focuses it
+
+  let closed = false;
+  const close = (keep) => {
+    if (closed) return;
+    closed = true;
+    input.remove(); // may fire blur; `closed` makes that a no-op
+    textEl.hidden = false;
+    host.classList.remove('is-editing');
+    if (keep) save(input.value.trim());
   };
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) {
@@ -1111,10 +1313,12 @@ function renderAddButton(addEl) {
   addEl.replaceChildren(btn);
 }
 
-function openAddInput(addEl, list) {
+// add(text) saves one item; returning false means nothing was added.
+// circle: show a placeholder checkbox while typing.
+function openAddInput(addEl, add, { circle = true } = {}) {
   const row = document.createElement('div');
   row.className = 'todo-add__row';
-  row.innerHTML = `<span class="check check--sm" aria-hidden="true"></span>`;
+  if (circle) row.innerHTML = `<span class="check check--sm" aria-hidden="true"></span>`;
   const input = createTodoInput();
   input.placeholder = addEl.dataset.label;
   input.setAttribute('enterkeyhint', 'enter');
@@ -1123,11 +1327,9 @@ function openAddInput(addEl, list) {
   addEl.replaceChildren(row);
   input.focus(); // inside the tap, so iOS shows the keyboard
 
-  const ul = todoSection(list).querySelector('.todo-list');
-  const add = () => {
+  const save = () => {
     const text = input.value.trim();
-    if (!text) return false;
-    ul.appendChild(createTodo(list, Store.addTodo(list, text)));
+    if (!text || add(text) === false) return false;
     input.value = '';
     return true;
   };
@@ -1142,27 +1344,371 @@ function openAddInput(addEl, list) {
     if (e.key === 'Enter' && !e.isComposing) {
       e.preventDefault();
       // Saved: stay open for the next one. Empty: done adding.
-      if (!add()) close();
+      if (!save()) close();
     } else if (e.key === 'Escape') {
       close();
     }
   });
   // Tapping outside keeps what was typed, then closes
   input.addEventListener('blur', () => {
-    add();
+    save();
     close();
   });
 }
 
 function initTodos() {
-  for (const list of TODO_LISTS) {
+  for (const list of TASK_LISTS) {
     const addEl = todoSection(list).querySelector('.todo-add');
     renderAddButton(addEl);
     addEl.addEventListener('click', (e) => {
-      if (e.target.closest('.todo-add__btn')) openAddInput(addEl, list);
+      if (!e.target.closest('.todo-add__btn')) return;
+      openAddInput(addEl, (text) => {
+        todoUl(list).appendChild(createTodo(list, Store.addTodo(list, text)));
+      });
     });
   }
+
+  const addGoal = todoSection('goals').querySelector('.todo-add');
+  renderAddButton(addGoal);
+  addGoal.addEventListener('click', (e) => {
+    if (!e.target.closest('.todo-add__btn')) return;
+    openAddInput(addGoal, (text) => {
+      goalsUl().appendChild(createGoal(Store.addTodo('goals', text)));
+    }, { circle: false });
+  });
 }
+
+/* ---------- Goals ----------
+   Each goal is a headline that opens and closes (tap; which ones are open
+   is remembered on this device). Inside are its blocks, set by what the
+   line starts with when typed (the prefix itself isn't shown):
+     "[] Book the exam" -> a task with a checkbox
+     "# Phase 1"        -> a text line in the regular weight (sub-heading)
+     anything else      -> a text line in the thin weight
+   Long press shows the prefix again for editing. A goal with at least one
+   task, all checked, is done: it moves to the top, struck through and
+   closed, and goes back to its place when a task is unchecked. */
+
+const CHEVRON_SVG =
+  '<svg viewBox="0 0 8 8" aria-hidden="true"><path d="M2.75 1 5.75 4 2.75 7" fill="none" ' +
+  'stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+function goalsUl() {
+  return todoUl('goals');
+}
+
+function orderedGoals() {
+  const goals = Store.goals();
+  return [...goals.filter((g) => g.doneOn).sort(byLatestDone), ...goals.filter((g) => !g.doneOn).sort(byPosition)];
+}
+
+function renderGoals() {
+  goalsUl().replaceChildren(...orderedGoals().map(createGoal));
+}
+
+function parseBlock(raw) {
+  const text = raw.trim();
+  if (/^\[\s?\]/.test(text)) return { type: 'task', weight: 'thin', text: text.replace(/^\[\s?\]\s*/, '') };
+  if (text.startsWith('#')) return { type: 'text', weight: 'regular', text: text.replace(/^#+\s*/, '') };
+  return { type: 'text', weight: 'thin', text };
+}
+
+function blockSource(item) {
+  if (item.type === 'task') return `[] ${item.text}`;
+  return item.weight === 'regular' ? `# ${item.text}` : item.text;
+}
+
+function createGoal(goal) {
+  const li = document.createElement('li');
+  li.className = 'goal';
+  li.dataset.id = goal.id;
+  li.innerHTML = `
+    <div class="goal__head" role="button">
+      <span class="goal__chevron">${CHEVRON_SVG}</span>
+      <span class="goal__title todo__text"></span>
+    </div>
+    <div class="goal__body">
+      <ul class="goal__blocks"></ul>
+      <div class="todo-add goal__add" data-label="add a note"></div>
+    </div>`;
+  updateGoal(li);
+  li.querySelector('.goal__blocks').replaceChildren(...Store.blocks(goal.id).map((b) => createBlock(li, b)));
+
+  const addEl = li.querySelector('.goal__add');
+  renderAddButton(addEl);
+  addEl.addEventListener('click', (e) => {
+    if (e.target.closest('.todo-add__btn')) openAddInput(addEl, (raw) => addBlock(li, raw), { circle: false });
+  });
+
+  const head = li.querySelector('.goal__head');
+  attachPressGestures(head, {
+    inputSelector: '.todo__input',
+    onLongPress: () => openGoalEditor(li),
+    onClick: () => {
+      Store.setGoalOpen(goal.id, !Store.isGoalOpen(goal.id));
+      updateGoal(li);
+    },
+    drag: () => !li.classList.contains('is-done') && {
+      el: li,
+      min: pinnedCount(li.parentElement),
+      onDrop: (ids) => Store.reposition('goals', goal.id, ids),
+    },
+  });
+  return li;
+}
+
+function updateGoal(li) {
+  const goal = Store.todo('goals', li.dataset.id);
+  if (!goal) return;
+  const open = Store.isGoalOpen(goal.id);
+  li.classList.toggle('is-done', !!goal.doneOn);
+  li.classList.toggle('is-open', open);
+  li.querySelector('.goal__title').textContent = goal.text;
+  const head = li.querySelector('.goal__head');
+  head.setAttribute('aria-expanded', String(open));
+  head.setAttribute('aria-label', `${goal.text}${goal.doneOn ? ', done' : ''}`);
+}
+
+// After its blocks changed: a goal that got done (or undone) moves, once
+// the checkmark has been seen
+function refreshGoal(li, delay = 0) {
+  if (!Store.updateGoalDone(li.dataset.id)) return;
+  clearTimeout(li._placeTimer);
+  li._placeTimer = setTimeout(() => {
+    if (!li.isConnected || Drag.active) return;
+    const ul = goalsUl();
+    const byId = new Map([...ul.children].map((g) => [g.dataset.id, g]));
+    const nodes = orderedGoals().map((g) => byId.get(g.id)).filter(Boolean);
+    flip(() => {
+      updateGoal(li);
+      reorderChildren(ul, nodes);
+    }, () => [...ul.children, todoSection('goals').querySelector(':scope > .todo-add')]);
+  }, delay);
+}
+
+function openGoalEditor(li) {
+  const goal = Store.todo('goals', li.dataset.id);
+  if (!goal) return;
+  const textEl = li.querySelector('.goal__title');
+  openInlineEditor(li.querySelector('.goal__head'), textEl, goal.text, (text) => {
+    if (!text) {
+      Store.setGoalOpen(goal.id, false);
+      Store.removeTodo('goals', goal.id);
+      li.remove();
+      return;
+    }
+    Store.updateTodo('goals', goal.id, { text });
+    updateGoal(li);
+  });
+}
+
+function createBlock(goalLi, item) {
+  const li = document.createElement('li');
+  const task = item.type === 'task';
+  li.className = `block block--${item.type}${item.weight === 'regular' ? ' block--regular' : ''}` +
+    `${task && item.doneOn ? ' is-done' : ''}`;
+  li.dataset.id = item.id;
+  li.innerHTML = task
+    ? `<button class="check check--xs" type="button">${CHECK_SVG}</button><span class="todo__text"></span>`
+    : '<span class="todo__text"></span>';
+  li.querySelector('.todo__text').textContent = item.text;
+  if (task) updateTodoLabel(li, item);
+  attachPressGestures(li, {
+    inputSelector: '.todo__input',
+    onLongPress: () => openBlockEditor(goalLi, li),
+    onClick: (e) => {
+      if (task && e.target.closest('.check')) toggleBlock(goalLi, li);
+    },
+    drag: () => !li.classList.contains('is-done') && {
+      el: li,
+      onDrop: (ids) => Store.reposition('goals', item.id, ids),
+    },
+  });
+  return li;
+}
+
+function addBlock(goalLi, raw) {
+  const block = parseBlock(raw);
+  if (!block.text) return false;
+  const item = Store.addTodo('goals', block.text, {
+    parentId: goalLi.dataset.id, type: block.type, weight: block.weight,
+  });
+  goalLi.querySelector('.goal__blocks').appendChild(createBlock(goalLi, item));
+  refreshGoal(goalLi);
+  return true;
+}
+
+function toggleBlock(goalLi, li) {
+  const item = Store.todo('goals', li.dataset.id);
+  if (!item) return;
+  Store.setTodoDone('goals', item.id, !item.doneOn);
+  li.classList.toggle('is-done', !!item.doneOn);
+  updateTodoLabel(li, item);
+  refreshGoal(goalLi, COMPLETE_DELAY_MS);
+}
+
+// Editing shows the prefix, so the type can be changed by adding or
+// removing it. A task that becomes text loses its checkmark.
+function openBlockEditor(goalLi, li) {
+  const item = Store.todo('goals', li.dataset.id);
+  if (!item) return;
+  openInlineEditor(li, li.querySelector('.todo__text'), blockSource(item), (raw) => {
+    const block = parseBlock(raw);
+    if (!block.text) {
+      Store.removeTodo('goals', item.id);
+      li.remove();
+    } else {
+      const fields = { ...block };
+      if (block.type !== 'task') Object.assign(fields, { doneOn: null, doneAt: null });
+      Store.updateTodo('goals', item.id, fields);
+      li.replaceWith(createBlock(goalLi, item));
+    }
+    refreshGoal(goalLi);
+  });
+}
+
+/* ---------- Drag and drop ----------
+   Long press, then move without lifting: the item lifts and follows the
+   pointer while the items around it slide out of the way; releasing drops
+   it there. The first `min` items (checked ones pinned at the top) can't be
+   passed. Near the top or bottom edge the screen scrolls along. Positions
+   are kept in screen-content coordinates so scrolling mid-drag is fine. */
+
+const DRAG_SCALE = 1.03;
+const DRAG_SHIFT_MS = 200; // others making room
+const DRAG_SETTLE_MS = 250; // the drop
+const AUTOSCROLL_EDGE_PX = 80;
+const AUTOSCROLL_MAX_PX = 12; // per frame, right at the edge
+
+// clientY of a pointer or touch event
+const eventY = (e) => (e.touches ? (e.touches[0] || e.changedTouches[0]).clientY : e.clientY);
+
+const Drag = {
+  active: null,
+
+  // cfg: { el, min, onDrop(ids) } with ids = the new order from index min on.
+  // startY: where the press began, so the item stays under the finger.
+  start(cfg, e, startY) {
+    const { el } = cfg;
+    if (!el.isConnected) return; // re-rendered meanwhile
+    const siblings = [...el.parentElement.children];
+    for (const s of siblings) s.getAnimations().forEach((a) => a.cancel());
+    const scroller = el.closest('.screen');
+    const scroll0 = scroller.scrollTop;
+    const boxes = siblings.map((s) => {
+      const r = s.getBoundingClientRect();
+      return { top: r.top + scroll0, height: r.height };
+    });
+    const from = siblings.indexOf(el);
+    this.active = {
+      cfg, el, siblings, boxes, from, to: from, scroller, scroll0,
+      min: Math.min(cfg.min || 0, from), startY, y: eventY(e), frame: 0,
+    };
+
+    el.classList.add('is-lifted');
+    el.style.transition = 'none';
+    for (const s of siblings) if (s !== el) s.style.transition = `transform ${DRAG_SHIFT_MS}ms ${EASE_OUT}`;
+    document.body.classList.add('is-dragging');
+
+    // Window listeners: the pointer leaves the item. Touch events too, in
+    // case the browser stops sending pointer events mid-gesture.
+    this.onMove = (ev) => {
+      if (ev.type === 'touchmove') ev.preventDefault(); // no scrolling
+      this.active.y = eventY(ev);
+      this.update();
+    };
+    this.onEnd = (ev) => {
+      if (ev.type === 'pointercancel' && ev.pointerType === 'touch') return; // touchend follows
+      this.drop();
+    };
+    window.addEventListener('pointermove', this.onMove);
+    window.addEventListener('touchmove', this.onMove, { passive: false });
+    for (const type of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) {
+      window.addEventListener(type, this.onEnd);
+    }
+    this.update();
+    this.scrollLoop();
+  },
+
+  update() {
+    const a = this.active;
+    const dy = a.y - a.startY + a.scroller.scrollTop - a.scroll0;
+    a.el.style.transform = `translateY(${dy}px) scale(${DRAG_SCALE})`;
+
+    const box = a.boxes[a.from];
+    const center = box.top + dy + box.height / 2;
+    const mid = (i) => a.boxes[i].top + a.boxes[i].height / 2;
+    let to = a.from;
+    while (to > a.min && center < mid(to - 1)) to--;
+    while (to < a.boxes.length - 1 && center > mid(to + 1)) to++;
+    if (to === a.to) return;
+    a.to = to;
+
+    a.siblings.forEach((s, i) => {
+      if (s === a.el) return;
+      let shift = 0;
+      if (i > a.from && i <= to) shift = -box.height;
+      else if (i < a.from && i >= to) shift = box.height;
+      s.style.transform = shift ? `translateY(${shift}px)` : '';
+    });
+  },
+
+  // Faster the closer the pointer gets to the edge (the tab bar counts as edge)
+  scrollLoop() {
+    const a = this.active;
+    if (!a) return;
+    const r = a.scroller.getBoundingClientRect();
+    const top = r.top + AUTOSCROLL_EDGE_PX;
+    const bottom = r.bottom - document.querySelector('.tabbar').offsetHeight - AUTOSCROLL_EDGE_PX;
+    const ratio = a.y < top ? (a.y - top) / AUTOSCROLL_EDGE_PX : a.y > bottom ? (a.y - bottom) / AUTOSCROLL_EDGE_PX : 0;
+    if (ratio) {
+      const before = a.scroller.scrollTop;
+      a.scroller.scrollTop += Math.max(-1, Math.min(1, ratio)) * AUTOSCROLL_MAX_PX;
+      if (a.scroller.scrollTop !== before) this.update();
+    }
+    a.frame = requestAnimationFrame(() => this.scrollLoop());
+  },
+
+  // Into the new order, then FLIP everything from where it's seen to its
+  // real place: the dragged item settles, the others finish making room.
+  drop() {
+    const a = this.active;
+    this.active = null;
+    cancelAnimationFrame(a.frame);
+    window.removeEventListener('pointermove', this.onMove);
+    window.removeEventListener('touchmove', this.onMove, { passive: false });
+    for (const type of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) {
+      window.removeEventListener(type, this.onEnd);
+    }
+    document.body.classList.remove('is-dragging');
+
+    const order = a.siblings.filter((s) => s !== a.el);
+    order.splice(a.to, 0, a.el);
+    const center = (s) => {
+      const r = s.getBoundingClientRect();
+      return r.top + r.height / 2;
+    };
+    const before = new Map(a.siblings.map((s) => [s, center(s)]));
+    for (const s of a.siblings) {
+      s.style.transition = 'none';
+      s.style.transform = '';
+    }
+    reorderChildren(a.el.parentElement, order);
+    a.el.style.transition = `box-shadow ${DRAG_SETTLE_MS}ms ease, background-color ${DRAG_SETTLE_MS}ms ease`;
+    a.el.classList.remove('is-lifted');
+
+    for (const s of a.siblings) {
+      const dy = before.get(s) - center(s);
+      const scale = s === a.el ? ` scale(${DRAG_SCALE})` : '';
+      if (Math.abs(dy) < 0.5 && !scale) continue;
+      s.animate([{ transform: `translateY(${dy}px)${scale}` }, { transform: 'none' }],
+        { duration: DRAG_SETTLE_MS, easing: EASE_OUT });
+    }
+    setTimeout(() => a.siblings.forEach((s) => { s.style.transition = ''; }), DRAG_SETTLE_MS);
+
+    if (a.to !== a.from) a.cfg.onDrop(order.slice(a.min).map((s) => s.dataset.id));
+  },
+};
 
 /* ---------- Tabs ---------- */
 
@@ -1228,7 +1774,8 @@ function initLogin() {
 // Pulled changes: re-render, but not under an open editor
 function onRemoteChange() {
   const editing = document.activeElement && document.activeElement.matches('input');
-  if (editing || !els.login.hidden) {
+  const pressing = Drag.active || document.querySelector('.is-held');
+  if (editing || pressing || !els.login.hidden) {
     setTimeout(onRemoteChange, 1000);
     return;
   }

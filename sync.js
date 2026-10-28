@@ -151,6 +151,9 @@ const Rows = {
     position: item.position,
     created_on: item.created,
     done_on: item.doneOn || null,
+    done_at: item.doneAt || null,
+    type: item.type,
+    weight: item.weight,
     deleted,
   }),
 };
@@ -167,7 +170,11 @@ function allRows() {
     for (const id of Object.keys(day.done)) out.habit_checks.push(Rows.check(date, id, true));
     for (const [id, note] of Object.entries(day.notes)) out.habit_notes.push(Rows.note(date, id, note));
   }
-  for (const list of TODO_LISTS) for (const item of d.todos[list]) out.todos.push(Rows.todo(list, item));
+  for (const list of TODO_LISTS) {
+    // Goals before their blocks
+    const items = [...d.todos[list]].sort((a, b) => !!a.parentId - !!b.parentId);
+    for (const item of items) out.todos.push(Rows.todo(list, item));
+  }
   // Checks/notes may name habits that aren't in the list (renamed or removed
   // ids): give them a habit row so nothing is rejected.
   const known = new Set(out.habits.map((h) => h.id));
@@ -200,17 +207,21 @@ function applyRow(table, row) {
     Store.prune(row.date);
   } else if (table === 'todos') {
     for (const list of TODO_LISTS) d.todos[list] = d.todos[list].filter((t) => t.id !== row.id);
-    // Deleted, or checked on an earlier day (gone from the app, kept on the server)
-    if (row.deleted || (row.done_on && row.done_on < todayKey())) return;
-    const items = d.todos[row.list];
-    items.push({
+    const item = {
       id: row.id,
       text: row.text,
       created: row.created_on,
       doneOn: row.done_on,
+      doneAt: row.done_at || null,
       position: row.position,
       parentId: row.parent_id,
-    });
+      type: row.type || 'task',
+      weight: row.weight || 'thin',
+    };
+    // Deleted, or checked on an earlier day (gone from the app, kept on the server)
+    if (row.deleted || isExpired(row.list, item, todayKey())) return;
+    const items = d.todos[row.list];
+    items.push(item);
     items.sort((a, b) => a.position - b.position);
   }
 }
