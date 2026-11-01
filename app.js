@@ -9,7 +9,7 @@
        days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } },
        todos: { today: [item], longterm: [item], goals: [item] },
        sleep: { "YYYY-MM-DD": { bed: "HH:MM", wake: "HH:MM" } }, // day of waking up
-       mood: { "YYYY-MM-DD": "happy" | "calm" | "sad" | "angry" | "anxious" | "tired" },
+       mood: { "YYYY-MM-DD": "happy" | "okay" | "meh" | "calm" | "sad" | "angry" | "anxious" | "tired" },
        ui: { openGoals: [id] },   // this device only, not synced
        sync: { pending: { key: { table, row } }, cursor, user }
      }
@@ -1927,7 +1927,8 @@ const NUMBER_LINE_MIN = 9.5 * 60; // 03:30: where day numbers and "+" sit withou
 const CARD_TOP_MIN = 17.25 * 60; // 11:15: the card's label line when over the chart
 const DEFAULT_NIGHT = { bed: '23:00', wake: '07:00' };
 
-const MOODS = ['happy', 'calm', 'sad', 'angry', 'anxious', 'tired'];
+// The chips' rows, in order
+const MOOD_ROWS = [['happy', 'okay', 'meh'], ['calm', 'sad', 'angry'], ['anxious', 'tired']];
 
 const tracker = {
   sleep: { month: null, pick: null, draft: null, pitch: null },
@@ -2250,7 +2251,7 @@ function renderMood() {
 
   const day = state.pick || currentDay;
   t.card.classList.toggle('is-done', !state.pick && !!Store.data.mood[currentDay]);
-  for (const chip of els.moodChips.children) {
+  for (const chip of els.moodChips.querySelectorAll('.mood-chip')) {
     chip.classList.toggle('is-current', Store.data.mood[day] === chip.dataset.mood);
   }
 }
@@ -2261,13 +2262,18 @@ function initMood() {
   els.moodGrid = root.querySelector('.mood-grid');
   els.moodChips = root.querySelector('.mood-chips');
 
-  for (const mood of MOODS) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'mood-chip';
-    chip.dataset.mood = mood;
-    chip.innerHTML = `<span>${mood}</span>`;
-    els.moodChips.append(chip);
+  for (const moods of MOOD_ROWS) {
+    const row = document.createElement('div');
+    row.className = 'mood-chips__row';
+    for (const mood of moods) {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'mood-chip';
+      chip.dataset.mood = mood;
+      chip.innerHTML = `<span>${mood}</span>`;
+      row.append(chip);
+    }
+    els.moodChips.append(row);
   }
 
   for (const btn of [els.mood.prev, els.mood.next]) {

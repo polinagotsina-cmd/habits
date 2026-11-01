@@ -1,6 +1,6 @@
 # Jade! database
 
-Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, `4_goals.sql`, then `5_trackers.sql`.
+Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, `4_goals.sql`, `5_trackers.sql`, then `6_moods.sql`.
 
 ## Connecting
 
@@ -121,7 +121,7 @@ sb.table("sleep").upsert({
 | column | type | |
 |---|---|---|
 | `date` | date | `YYYY-MM-DD` |
-| `mood` | text | one of `happy`, `calm`, `sad`, `angry`, `anxious`, `tired` |
+| `mood` | text | one of `happy`, `okay`, `meh`, `calm`, `sad`, `angry`, `anxious`, `tired` (`okay` and `meh` need `6_moods.sql`) |
 
 Key: (`user_id`, `date`): one mood per day; writing the same date again replaces it.
 
