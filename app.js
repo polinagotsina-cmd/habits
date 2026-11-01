@@ -8,6 +8,8 @@
        habits: [{ id, name, position, archived }],
        days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } },
        todos: { today: [item], longterm: [item], goals: [item] },
+       sleep: { "YYYY-MM-DD": { bed: "HH:MM", wake: "HH:MM" } }, // day of waking up
+       mood: { "YYYY-MM-DD": "happy" | "calm" | "sad" | "angry" | "anxious" | "tired" },
        ui: { openGoals: [id] },   // this device only, not synced
        sync: { pending: { key: { table, row } }, cursor, user }
      }
@@ -141,6 +143,8 @@ const Store = {
         if (!item.weight) item.weight = 'thin';
       });
     }
+    if (!d.sleep || typeof d.sleep !== 'object') d.sleep = {};
+    if (!d.mood || typeof d.mood !== 'object') d.mood = {};
     if (!d.ui || typeof d.ui !== 'object') d.ui = {};
     if (!Array.isArray(d.ui.openGoals)) d.ui.openGoals = [];
     if (!Array.isArray(d.habits)) {
@@ -186,6 +190,18 @@ const Store = {
     else delete day.done[id];
     this.prune(key);
     Sync.queue('habit_checks', Rows.check(key, id, done));
+    this.save();
+  },
+
+  setSleep(key, bed, wake) {
+    this.data.sleep[key] = { bed, wake };
+    Sync.queue('sleep', Rows.sleep(key, this.data.sleep[key]));
+    this.save();
+  },
+
+  setMood(key, mood) {
+    this.data.mood[key] = mood;
+    Sync.queue('mood', Rows.mood(key, mood));
     this.save();
   },
 
@@ -1894,6 +1910,397 @@ const Drag = {
   },
 };
 
+/* ---------- Trackers ----------
+   Sleep: one bar per day (the day of waking up) on a time axis running from
+   18:00 at the top to 17:00 at the bottom. The bars sit in a horizontal
+   scroller; pinching changes the day width (--pitch) between "about a
+   week" and "the whole month". Mood: one square per day of the month.
+   Each tracker has a card for today; tapping a past day picks it (orange
+   outline) and the card edits that day instead. */
+
+const HOUR_PX = 17; // one hour on the sleep chart
+const CHART_HOURS = 24;
+const DAYS_ZOOMED_IN = 7.5; // days in view at the default zoom
+const BAR_RATIO = 0.78; // bar width / day width
+const BAR_NUMBER_MIN_PX = 14; // narrower bars hide their day number
+const NUMBER_LINE_MIN = 9.5 * 60; // 03:30: where day numbers and "+" sit without data
+const CARD_TOP_MIN = 17.25 * 60; // 11:15: the card's label line when over the chart
+const DEFAULT_NIGHT = { bed: '23:00', wake: '07:00' };
+
+const MOODS = ['happy', 'calm', 'sad', 'angry', 'anxious', 'tired'];
+
+const tracker = {
+  sleep: { month: null, pick: null, draft: null, pitch: null },
+  mood: { month: null, pick: null },
+};
+
+const minToPx = (min) => (min / 60) * HOUR_PX;
+
+function trackerEls(name) {
+  const root = document.querySelector(`.tracker--${name}`);
+  return {
+    root,
+    prev: root.querySelector('[data-step="-1"]'),
+    next: root.querySelector('[data-step="1"]'),
+    monthName: root.querySelector('.tracker__month-name'),
+    label: root.querySelector('.tracker__label'),
+    card: root.querySelector('.tracker-card'),
+  };
+}
+
+// No future months; back to the earliest data, and at least one month back
+function trackerMonths(data) {
+  const last = Stats.monthOf(currentDay);
+  let first = Stats.addMonths(last, -1);
+  for (const key of Object.keys(data)) if (Stats.monthOf(key) < first) first = Stats.monthOf(key);
+  return { first, last };
+}
+
+function renderTrackerHeader(t, state, data) {
+  const { first, last } = trackerMonths(data);
+  if (!state.month || state.month > last) state.month = last;
+  if (state.month < first) state.month = first;
+  t.monthName.textContent = monthLabel(state.month);
+  t.prev.disabled = state.month <= first;
+  t.next.disabled = state.month >= last;
+  t.label.textContent = state.pick && state.pick !== currentDay ? shortDate(state.pick) : 'Today';
+}
+
+const monthKeys = (month) =>
+  Array.from({ length: Trackers.daysInMonth(month) }, (_, i) => `${month}-${pad(i + 1)}`);
+
+function renderTrackers({ scroll = false } = {}) {
+  renderSleep({ scroll });
+  renderMood();
+}
+
+/* ----- Sleep ----- */
+
+function sleepPitchRange() {
+  const width = els.sleepScroll.clientWidth || 330;
+  const days = Trackers.daysInMonth(tracker.sleep.month);
+  const max = width / DAYS_ZOOMED_IN;
+  return { min: Math.min(width / days, max), max };
+}
+
+function sleepPitch() {
+  const { min, max } = sleepPitchRange();
+  const p = tracker.sleep.pitch;
+  return p === null ? max : Math.min(max, Math.max(min, p));
+}
+
+// Day width only: everything inside the track is laid out from --pitch
+function applySleepPitch(pitch) {
+  const track = els.sleepTrack;
+  track.style.setProperty('--pitch', `${pitch}px`);
+  track.style.width = `${pitch * Trackers.daysInMonth(tracker.sleep.month)}px`;
+  track.classList.toggle('is-narrow', pitch * BAR_RATIO < BAR_NUMBER_MIN_PX);
+}
+
+function renderSleep({ scroll = false } = {}) {
+  const state = tracker.sleep;
+  const t = els.sleep;
+  renderTrackerHeader(t, state, Store.data.sleep);
+
+  const sleep = Store.data.sleep;
+  const today = sleep[currentDay];
+  els.sleepLast.textContent =
+    `last night ${today ? Trackers.formatDuration(Trackers.duration(today.bed, today.wake)) : '–'}`;
+  const avg = Trackers.monthAverage(sleep, state.month);
+  els.sleepAvg.textContent = `avg ${avg === null ? '–' : Trackers.formatDuration(avg)}`;
+
+  // Bars
+  const keys = monthKeys(state.month);
+  const spans = keys.map((key) => sleep[key] && Trackers.span(sleep[key].bed, sleep[key].wake));
+  const shown = spans.filter(Boolean);
+  // Day numbers and "+" share one line: the middle of the month's nights
+  const line = shown.length
+    ? shown.reduce((sum, s) => sum + (Math.max(0, s.start) + Math.min(Trackers.DAY_MIN, s.end)) / 2, 0) / shown.length
+    : NUMBER_LINE_MIN;
+
+  const track = els.sleepTrack;
+  track.textContent = '';
+  keys.forEach((key, i) => {
+    if (key > currentDay) return; // future days stay empty
+    const s = spans[i];
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.day = key;
+    btn.style.setProperty('--i', i);
+    if (s) {
+      const top = minToPx(Math.max(0, s.start));
+      const bottom = minToPx(Math.min(Trackers.DAY_MIN, s.end));
+      btn.className = 'sleep-bar';
+      btn.style.top = `${top}px`;
+      btn.style.height = `${Math.max(bottom - top, 4)}px`;
+      btn.setAttribute('aria-label', `${shortDate(key)}: ${sleep[key].bed}–${sleep[key].wake}`);
+      const num = document.createElement('span');
+      num.className = 'sleep-bar__day';
+      num.textContent = String(i + 1);
+      num.style.top = `${Math.min(Math.max(minToPx(line), top + 8), bottom - 8) - top}px`;
+      if (bottom - top < 16) num.hidden = true;
+      btn.append(num);
+    } else {
+      btn.className = 'sleep-plus';
+      btn.style.top = `${minToPx(line)}px`;
+      btn.textContent = '+';
+      btn.setAttribute('aria-label', `Add ${shortDate(key)}`);
+    }
+    btn.classList.toggle('is-today', key === currentDay);
+    btn.classList.toggle('is-picked', key === state.pick);
+    track.append(btn);
+  });
+
+  applySleepPitch(sleepPitch());
+
+  // The card sits over the empty lower part of the chart, as in the mockup,
+  // unless a night reaches down there (e.g. 4:00–17:00): then it goes below.
+  const clear = shown.every((s) => s.end <= CARD_TOP_MIN - 30);
+  t.root.classList.toggle('is-card-over', clear);
+
+  if (scroll) scrollSleepToDay();
+  renderSleepCard();
+}
+
+// Today (or the month's last day) near the right edge of the view
+function scrollSleepToDay() {
+  const keys = monthKeys(tracker.sleep.month);
+  const last = keys.includes(currentDay) ? keys.indexOf(currentDay) : keys.length - 1;
+  const pitch = sleepPitch();
+  const sc = els.sleepScroll;
+  sc.scrollLeft = Math.max(0, (last + 1.5) * pitch - sc.clientWidth);
+}
+
+function renderSleepCard() {
+  const state = tracker.sleep;
+  const done = !state.pick && Store.data.sleep[currentDay];
+  els.sleep.card.classList.toggle('is-done', !!done);
+  if (done) return;
+  const day = state.pick || currentDay;
+  if (!state.draft || state.draft.day !== day) {
+    const night = Store.data.sleep[day] || latestNight() || DEFAULT_NIGHT;
+    state.draft = { day, bed: night.bed, wake: night.wake };
+  }
+  for (const name of ['bed', 'wake']) {
+    els.sleepValues[name].textContent = Trackers.formatTime(state.draft[name]);
+    els.sleepInputs[name].value = state.draft[name];
+  }
+  els.sleepError.textContent = '';
+}
+
+function latestNight() {
+  const keys = Object.keys(Store.data.sleep).sort();
+  return keys.length ? Store.data.sleep[keys[keys.length - 1]] : null;
+}
+
+function pickSleepDay(key) {
+  const state = tracker.sleep;
+  // Tapping the picked day again lets go (today's card goes back to Done!)
+  state.pick = state.pick === key ? null : key;
+  state.draft = null;
+  renderSleep();
+}
+
+function saveSleep() {
+  const state = tracker.sleep;
+  const { day, bed, wake } = state.draft;
+  const problem = Trackers.problem(bed, wake);
+  if (problem) {
+    els.sleepError.textContent = problem;
+    return;
+  }
+  Store.setSleep(day, bed, wake);
+  state.pick = null;
+  state.draft = null;
+  renderSleep();
+}
+
+// Two-finger pinch on the chart changes the day width around the point
+// between the fingers. touch-action on the scroller stops the page zoom.
+function initSleepPinch() {
+  const sc = els.sleepScroll;
+  let pinch = null;
+  const gap = (t) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const midX = (t) => (t[0].clientX + t[1].clientX) / 2 - sc.getBoundingClientRect().left;
+
+  const zoom = (pitch, day, mid) => {
+    const { min, max } = sleepPitchRange();
+    const p = Math.min(max, Math.max(min, pitch));
+    tracker.sleep.pitch = p;
+    applySleepPitch(p);
+    sc.scrollLeft = day * p - mid;
+  };
+
+  sc.addEventListener('touchstart', (e) => {
+    if (e.touches.length !== 2) return;
+    e.preventDefault();
+    const pitch = sleepPitch();
+    pinch = { gap: gap(e.touches), pitch, day: (sc.scrollLeft + midX(e.touches)) / pitch };
+  }, { passive: false });
+
+  sc.addEventListener('touchmove', (e) => {
+    if (!pinch || e.touches.length !== 2) return;
+    e.preventDefault();
+    zoom(pinch.pitch * (gap(e.touches) / pinch.gap), pinch.day, midX(e.touches));
+  }, { passive: false });
+
+  const end = (e) => {
+    if (e.touches.length < 2) pinch = null;
+  };
+  sc.addEventListener('touchend', end);
+  sc.addEventListener('touchcancel', end);
+  // Safari's own pinch gesture events
+  for (const type of ['gesturestart', 'gesturechange']) {
+    sc.addEventListener(type, (e) => e.preventDefault());
+  }
+
+  // Trackpad pinch on a computer arrives as ctrl + wheel
+  sc.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const old = sleepPitch();
+    const mid = e.clientX - sc.getBoundingClientRect().left;
+    zoom(old * Math.exp(-e.deltaY / 100), (sc.scrollLeft + mid) / old, mid);
+  }, { passive: false });
+}
+
+function initSleep() {
+  els.sleep = trackerEls('sleep');
+  const root = els.sleep.root;
+  els.sleepLast = $('#sleep-last');
+  els.sleepAvg = $('#sleep-avg');
+  els.sleepScroll = root.querySelector('.sleep-chart__scroll');
+  els.sleepTrack = root.querySelector('.sleep-chart__track');
+  els.sleepError = root.querySelector('.sleep-card__error');
+  els.sleepInputs = {};
+  els.sleepValues = {};
+  for (const name of ['bed', 'wake']) {
+    els.sleepInputs[name] = root.querySelector(`input[name="${name}"]`);
+    els.sleepValues[name] = root.querySelector(`[data-for="${name}"]`);
+  }
+
+  // Hour labels: 18 … 23, 00, 1 … 17
+  const hours = root.querySelector('.sleep-chart__hours');
+  for (let i = 0; i < CHART_HOURS; i++) {
+    const h = (18 + i) % 24;
+    const label = document.createElement('span');
+    label.textContent = h === 0 ? '00' : String(h);
+    label.style.top = `${i * HOUR_PX}px`;
+    hours.append(label);
+  }
+
+  for (const btn of [els.sleep.prev, els.sleep.next]) {
+    btn.addEventListener('click', () => {
+      tracker.sleep.month = Stats.addMonths(tracker.sleep.month, Number(btn.dataset.step));
+      tracker.sleep.pick = null;
+      tracker.sleep.draft = null;
+      renderSleep({ scroll: true });
+    });
+  }
+
+  els.sleepTrack.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-day]');
+    if (btn) pickSleepDay(btn.dataset.day);
+  });
+
+  for (const [name, input] of Object.entries(els.sleepInputs)) {
+    const update = () => {
+      // Cleared in the picker: keep the old time. No draft: the card shows Done!
+      if (!input.value || !tracker.sleep.draft) return;
+      tracker.sleep.draft[name] = input.value.slice(0, 5);
+      els.sleepValues[name].textContent = Trackers.formatTime(tracker.sleep.draft[name]);
+      els.sleepError.textContent = '';
+    };
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+    // A mouse click doesn't open the (invisible) input's picker by itself
+    input.addEventListener('click', () => {
+      if (matchMedia('(pointer: fine)').matches && input.showPicker) {
+        try { input.showPicker(); } catch (err) { /* not allowed here */ }
+      }
+    });
+  }
+
+  root.querySelector('.tracker-save').addEventListener('click', saveSleep);
+  initSleepPinch();
+  window.addEventListener('resize', () => renderSleep());
+}
+
+/* ----- Mood ----- */
+
+function renderMood() {
+  const state = tracker.mood;
+  const t = els.mood;
+  renderTrackerHeader(t, state, Store.data.mood);
+
+  const grid = els.moodGrid;
+  grid.textContent = '';
+  for (const key of monthKeys(state.month)) {
+    const sq = document.createElement('button');
+    sq.type = 'button';
+    sq.className = 'mood-day';
+    sq.dataset.day = key;
+    const mood = Store.data.mood[key];
+    if (mood) sq.dataset.mood = mood;
+    sq.disabled = key > currentDay;
+    sq.classList.toggle('is-picked', key === state.pick);
+    sq.setAttribute('aria-label', `${shortDate(key)}${mood ? `: ${mood}` : ''}`);
+    grid.append(sq);
+  }
+
+  const day = state.pick || currentDay;
+  t.card.classList.toggle('is-done', !state.pick && !!Store.data.mood[currentDay]);
+  for (const chip of els.moodChips.children) {
+    chip.classList.toggle('is-current', Store.data.mood[day] === chip.dataset.mood);
+  }
+}
+
+function initMood() {
+  els.mood = trackerEls('mood');
+  const root = els.mood.root;
+  els.moodGrid = root.querySelector('.mood-grid');
+  els.moodChips = root.querySelector('.mood-chips');
+
+  for (const mood of MOODS) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'mood-chip';
+    chip.dataset.mood = mood;
+    chip.innerHTML = `<span>${mood}</span>`;
+    els.moodChips.append(chip);
+  }
+
+  for (const btn of [els.mood.prev, els.mood.next]) {
+    btn.addEventListener('click', () => {
+      tracker.mood.month = Stats.addMonths(tracker.mood.month, Number(btn.dataset.step));
+      tracker.mood.pick = null;
+      renderMood();
+    });
+  }
+
+  // A past day picks it for editing; today's square reopens the chips
+  els.moodGrid.addEventListener('click', (e) => {
+    const sq = e.target.closest('.mood-day');
+    if (!sq || sq.disabled) return;
+    const state = tracker.mood;
+    state.pick = state.pick === sq.dataset.day ? null : sq.dataset.day;
+    renderMood();
+  });
+
+  els.moodChips.addEventListener('click', (e) => {
+    const chip = e.target.closest('.mood-chip');
+    if (!chip) return;
+    Store.setMood(tracker.mood.pick || currentDay, chip.dataset.mood);
+    tracker.mood.pick = null;
+    renderMood();
+  });
+}
+
+function initTrackers() {
+  initSleep();
+  initMood();
+}
+
 /* ---------- Tabs ---------- */
 
 function showScreen(name) {
@@ -1968,6 +2375,7 @@ function onRemoteChange() {
   renderWeek();
   renderStats();
   renderTodos();
+  renderTrackers();
 }
 
 /* ---------- Day change ---------- */
@@ -1977,10 +2385,16 @@ let midnightTimer = null;
 function renderAll() {
   currentDay = todayKey();
   statsMonth = null; // back to the current month
+  for (const state of Object.values(tracker)) {
+    state.month = null;
+    state.pick = null;
+  }
+  tracker.sleep.draft = null;
   renderToday();
   renderWeek();
   renderStats();
   renderTodos();
+  renderTrackers({ scroll: true });
 }
 
 function checkDay() {
@@ -2028,6 +2442,7 @@ showLogin(!Auth.session);
 initGrid();
 initStats();
 initTodos();
+initTrackers();
 initTabs();
 renderAll();
 initDayWatch();

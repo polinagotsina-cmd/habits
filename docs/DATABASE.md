@@ -1,6 +1,6 @@
 # Jade! database
 
-Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, then `4_goals.sql`.
+Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, `4_goals.sql`, then `5_trackers.sql`.
 
 ## Connecting
 
@@ -96,6 +96,41 @@ sb.table("todos").insert({
 }).execute()
 ```
 To put it between two blocks, use the average of their positions. To check a task, update `done_on` (the day) and `done_at` (now) along with `updated_at`.
+
+### `sleep`: a night of sleep
+| column | type | |
+|---|---|---|
+| `date` | date | the day of **waking up**, `YYYY-MM-DD` |
+| `bedtime` | time | local time, e.g. `23:15` (read back as `23:15:00`) |
+| `wake_time` | time | local time, e.g. `07:30` |
+
+Key: (`user_id`, `date`): one night per day; writing the same date again replaces it.
+
+- **Length** = `wake_time - bedtime`; if `wake_time` is earlier than `bedtime`, add 24h (the wake-up is on the next day). `23:15 → 07:30` is 8h 15m; `04:00 → 17:00` is 13h, all on `date`.
+- The app accepts more than 0 and at most 20 hours. Check the same when writing.
+- "Last night" in the app is the row for today's date; "avg" is the average length over the rows in the shown month.
+
+```python
+sb.table("sleep").upsert({
+    "date": "2026-11-07", "bedtime": "23:15", "wake_time": "07:30",
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+}, on_conflict="user_id,date").execute()
+```
+
+### `mood`: the mood of a day
+| column | type | |
+|---|---|---|
+| `date` | date | `YYYY-MM-DD` |
+| `mood` | text | one of `happy`, `calm`, `sad`, `angry`, `anxious`, `tired` |
+
+Key: (`user_id`, `date`): one mood per day; writing the same date again replaces it.
+
+```python
+sb.table("mood").upsert({
+    "date": "2026-11-07", "mood": "calm",
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+}, on_conflict="user_id,date").execute()
+```
 
 ### Common columns
 | column | type | |

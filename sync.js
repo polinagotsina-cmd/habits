@@ -37,6 +37,8 @@ const TABLES = {
   habit_checks: { key: ['date', 'habit_id'], order: 'date,habit_id' },
   habit_notes: { key: ['date', 'habit_id'], order: 'date,habit_id' },
   todos: { key: ['id'], order: 'id' },
+  sleep: { key: ['date'], order: 'date' },
+  mood: { key: ['date'], order: 'date' },
 };
 
 class AuthError extends Error {}
@@ -156,6 +158,8 @@ const Rows = {
     weight: item.weight,
     deleted,
   }),
+  sleep: (date, night) => ({ date, bedtime: night.bed, wake_time: night.wake }),
+  mood: (date, mood) => ({ date, mood }),
 };
 
 const rowKey = (table, row) => `${table}:${TABLES[table].key.map((k) => row[k]).join('|')}`;
@@ -163,7 +167,7 @@ const newer = (a, b) => Date.parse(a) > Date.parse(b);
 
 // Everything stored locally, as rows (for the first upload)
 function allRows() {
-  const out = { habits: [], habit_checks: [], habit_notes: [], todos: [] };
+  const out = { habits: [], habit_checks: [], habit_notes: [], todos: [], sleep: [], mood: [] };
   const d = Store.data;
   for (const h of d.habits) out.habits.push(Rows.habit(h));
   for (const [date, day] of Object.entries(d.days)) {
@@ -175,6 +179,8 @@ function allRows() {
     const items = [...d.todos[list]].sort((a, b) => !!a.parentId - !!b.parentId);
     for (const item of items) out.todos.push(Rows.todo(list, item));
   }
+  for (const [date, night] of Object.entries(d.sleep)) out.sleep.push(Rows.sleep(date, night));
+  for (const [date, mood] of Object.entries(d.mood)) out.mood.push(Rows.mood(date, mood));
   // Checks/notes may name habits that aren't in the list (renamed or removed
   // ids): give them a habit row so nothing is rejected.
   const known = new Set(out.habits.map((h) => h.id));
@@ -223,6 +229,11 @@ function applyRow(table, row) {
     const items = d.todos[row.list];
     items.push(item);
     items.sort((a, b) => a.position - b.position);
+  } else if (table === 'sleep') {
+    // Postgres sends times as "23:15:00"
+    d.sleep[row.date] = { bed: row.bedtime.slice(0, 5), wake: row.wake_time.slice(0, 5) };
+  } else if (table === 'mood') {
+    d.mood[row.date] = row.mood;
   }
 }
 

@@ -109,13 +109,76 @@
     </section>
   </main>
 
+  <!-- Screen: Trackers -->
+  <main id="trackers" class="screen app" aria-label="Trackers">
+    <header class="app__header">
+      <div class="logo">Trackers</div>
+    </header>
+
+    <section class="tracker tracker--sleep" aria-labelledby="sleep-heading">
+      <h2 id="sleep-heading" class="tracker__name">sleep</h2>
+      <div class="tracker__month">
+        <button class="tracker__arrow" type="button" data-step="-1" aria-label="Previous month">‹</button>
+        <span class="tracker__month-name section-title"></span>
+        <button class="tracker__arrow" type="button" data-step="1" aria-label="Next month">›</button>
+      </div>
+      <p class="sleep-summary"><span id="sleep-last"></span><span id="sleep-avg"></span></p>
+
+      <div class="sleep-chart">
+        <div class="sleep-chart__hours" aria-hidden="true"></div>
+        <div class="sleep-chart__scroll">
+          <div class="sleep-chart__track"></div>
+        </div>
+      </div>
+
+      <p class="tracker__label"></p>
+      <div class="tracker-card sleep-card">
+        <div class="sleep-card__form">
+          <div class="sleep-card__fields">
+            <label class="sleep-field">
+              <span class="sleep-field__name">Bedtime</span>
+              <span class="sleep-field__value" data-for="bed"></span>
+              <input class="sleep-field__input" type="time" name="bed" required>
+            </label>
+            <label class="sleep-field">
+              <span class="sleep-field__name">Wake up</span>
+              <span class="sleep-field__value" data-for="wake"></span>
+              <input class="sleep-field__input" type="time" name="wake" required>
+            </label>
+          </div>
+          <button class="tracker-save" type="button">save</button>
+          <p class="sleep-card__error" aria-live="polite"></p>
+        </div>
+        <p class="tracker-done">Done!</p>
+      </div>
+    </section>
+
+    <section class="tracker tracker--mood" aria-labelledby="mood-heading">
+      <h2 id="mood-heading" class="tracker__name">mood</h2>
+      <div class="tracker__month">
+        <button class="tracker__arrow" type="button" data-step="-1" aria-label="Previous month">‹</button>
+        <span class="tracker__month-name section-title"></span>
+        <button class="tracker__arrow" type="button" data-step="1" aria-label="Next month">›</button>
+      </div>
+      <div class="mood-grid"></div>
+
+      <p class="tracker__label"></p>
+      <div class="tracker-card mood-card">
+        <div class="mood-chips" role="group" aria-label="Mood"></div>
+        <p class="tracker-done">Done!</p>
+      </div>
+    </section>
+  </main>
+
   <!-- Bottom tab toggle -->
   <nav class="tabbar" aria-label="Screens">
     <button class="tab is-active" type="button" data-screen="habits" aria-pressed="true"><span class="tab__pill">Habits</span></button>
     <button class="tab" type="button" data-screen="todo" aria-pressed="false"><span class="tab__pill">To do list</span></button>
+    <button class="tab" type="button" data-screen="trackers" aria-pressed="false"><span class="tab__pill">Trackers</span></button>
   </nav>
 
   <script src="stats.js"></script>
+  <script src="trackers.js"></script>
   <script src="sync.js"></script>
   <script src="app.js"></script>
 </body>

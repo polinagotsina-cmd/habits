@@ -5,7 +5,7 @@
    (e.g. https://username.github.io/repo-name/).
    Bump CACHE_VERSION when you change the list of shell files. */
 
-const CACHE_VERSION = 'v8';
+const CACHE_VERSION = 'v9';
 const SHELL_CACHE = `habits-shell-${CACHE_VERSION}`;
 const FONT_CACHE = 'habits-fonts';
 
@@ -14,6 +14,7 @@ const SHELL_FILES = [
   './index.html',
   './styles.css',
   './stats.js',
+  './trackers.js',
   './sync.js',
   './app.js',
   './manifest.json',

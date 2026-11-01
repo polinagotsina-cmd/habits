@@ -1108,3 +1108,370 @@ button {
 .is-dragging * {
   cursor: grabbing !important;
 }
+
+/* ---------- Trackers ---------- */
+
+.tracker {
+  --hour: 17px; /* HOUR_PX in app.js */
+  --chart-pad: 8px; /* room for the first and last hour label */
+  text-align: center;
+}
+
+.tracker--sleep {
+  margin-top: -10px;
+}
+
+.tracker--mood {
+  margin-top: 140px;
+}
+
+.tracker__name {
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.tracker__month {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 6px;
+}
+
+.tracker__arrow {
+  position: relative;
+  padding: 0 12px;
+  color: var(--orange);
+  font-size: 22px;
+  line-height: 29px;
+  opacity: 0.6;
+  touch-action: manipulation;
+}
+
+/* 44px tap target */
+.tracker__arrow::before {
+  content: "";
+  position: absolute;
+  inset: -8px -4px;
+}
+
+.tracker__arrow:disabled {
+  opacity: 0.15;
+  cursor: default;
+}
+
+.sleep-summary {
+  display: flex;
+  justify-content: center;
+  gap: 29px;
+  margin-top: 2px;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+/* ----- Sleep chart ----- */
+
+.sleep-chart {
+  display: flex;
+  margin-top: 11px;
+  padding: 0 calc(var(--safe-right) + 16px) 0 calc(var(--safe-left) + 9px);
+}
+
+.sleep-chart__hours {
+  position: relative;
+  flex: none;
+  width: 19px;
+  height: calc(24 * var(--hour));
+  margin-top: var(--chart-pad);
+  font-size: 10px;
+  line-height: 12px;
+  text-align: left;
+}
+
+.sleep-chart__hours span {
+  position: absolute;
+  left: 0;
+  transform: translateY(-50%);
+}
+
+.sleep-chart__scroll {
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  touch-action: pan-x pan-y; /* no browser pinch-zoom: app.js zooms the bars */
+  scrollbar-width: none;
+  padding: var(--chart-pad) 0;
+}
+
+.sleep-chart__scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.sleep-chart__track {
+  --pitch: 44px;
+  --bar: calc(var(--pitch) * 0.78); /* BAR_RATIO in app.js */
+  position: relative;
+  height: calc(24 * var(--hour));
+}
+
+.sleep-bar,
+.sleep-plus {
+  position: absolute;
+  left: calc(var(--i) * var(--pitch) + (var(--pitch) - var(--bar)) / 2);
+  width: var(--bar);
+  touch-action: pan-x pan-y;
+}
+
+.sleep-bar {
+  border-radius: 4px;
+  background: var(--yellow);
+  color: var(--orange);
+}
+
+.sleep-bar.is-today {
+  background: var(--orange);
+  color: var(--cream);
+}
+
+.sleep-bar.is-picked {
+  box-shadow: inset 0 0 0 2px var(--orange);
+}
+
+.sleep-bar.is-today.is-picked {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--orange);
+}
+
+.sleep-bar__day {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.is-narrow .sleep-bar__day {
+  display: none;
+}
+
+.sleep-plus {
+  height: 28px;
+  border-radius: 4px;
+  transform: translateY(-50%);
+  color: var(--muted);
+  font-size: 20px;
+  font-weight: 300;
+  line-height: 28px;
+}
+
+.is-narrow .sleep-plus {
+  font-size: 14px;
+}
+
+.sleep-plus.is-picked {
+  color: var(--orange);
+  box-shadow: inset 0 0 0 2px var(--orange);
+}
+
+/* ----- Cards ----- */
+
+.tracker__label {
+  position: relative;
+  z-index: 1;
+  margin-top: 8px;
+  font-size: 11px;
+  font-weight: 300;
+  line-height: 14px;
+}
+
+/* Over the empty bottom of the chart: the label line at 11:15 (CARD_TOP_MIN) */
+.tracker--sleep.is-card-over .tracker__label {
+  margin-top: calc(-6.75 * var(--hour) - var(--chart-pad) - 1px);
+}
+
+.tracker-card {
+  position: relative;
+  z-index: 1;
+  width: min(240px, calc(100% - 32px));
+  margin: 2px auto 0;
+  border: 1.5px solid var(--yellow);
+  border-radius: var(--card-radius);
+  background: var(--bg);
+}
+
+.tracker-done {
+  display: none;
+  font-family: var(--font-serif);
+  font-size: 50px;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.tracker-card.is-done > :not(.tracker-done) {
+  display: none;
+}
+
+.tracker-card.is-done .tracker-done {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.sleep-card {
+  height: 86px;
+}
+
+.sleep-card__form {
+  padding-top: 20px;
+}
+
+.sleep-card__fields {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+}
+
+.sleep-field {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 70px;
+  cursor: pointer;
+}
+
+.sleep-field__name {
+  font-size: 10px;
+  font-weight: 300;
+  line-height: 12px;
+}
+
+.sleep-field__value {
+  margin-top: 4px;
+  font-size: 16px;
+  line-height: 20px;
+}
+
+/* The real input covers the field invisibly: a tap opens the time wheel.
+   16px keeps iOS from zooming in on focus. */
+.sleep-field__input {
+  position: absolute;
+  inset: -6px 0;
+  width: 100%;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 16px;
+  opacity: 0;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.tracker-save {
+  position: relative;
+  margin-top: 5px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: var(--yellow);
+  font-size: 9px;
+  line-height: 14px;
+  touch-action: manipulation;
+}
+
+.tracker-save::before {
+  content: "";
+  position: absolute;
+  inset: -14px -18px -8px;
+}
+
+.sleep-card__error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 6px);
+  color: var(--orange);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+/* ----- Mood ----- */
+
+.mood-grid {
+  display: grid;
+  grid-template-columns: repeat(14, 1fr);
+  gap: 4px;
+  margin-top: 10px;
+  padding: 0 calc(var(--safe-right) + 15px) 0 calc(var(--safe-left) + 15px);
+}
+
+.mood-day {
+  aspect-ratio: 1;
+  border-radius: 5px;
+  background: var(--empty);
+  touch-action: manipulation;
+}
+
+.mood-day:disabled {
+  cursor: default;
+}
+
+.mood-day.is-picked {
+  box-shadow: inset 0 0 0 2px var(--orange);
+}
+
+.mood-day[data-mood="happy"] { background: #FFD768; }
+.mood-day[data-mood="calm"] { background: #B5EDA4; }
+.mood-day[data-mood="sad"] { background: #CCE1F5; }
+.mood-day[data-mood="angry"] { background: #FFB7B7; }
+.mood-day[data-mood="anxious"] { background: #EECCF5; }
+.mood-day[data-mood="tired"] { background: #BCBCBC; }
+
+.tracker--mood .tracker__label {
+  margin-top: 39px;
+}
+
+.mood-card {
+  min-height: 75px;
+}
+
+.mood-card.is-done {
+  height: 75px;
+}
+
+.mood-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 3px;
+  padding: 1px 14px;
+}
+
+/* 36px tap target; the visible pill is smaller, as in the mockup */
+.mood-chip {
+  display: flex;
+  align-items: center;
+  height: 36px;
+  touch-action: manipulation;
+}
+
+.mood-chip span {
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 14px;
+  line-height: 26px;
+}
+
+.mood-chip.is-current span {
+  box-shadow: inset 0 0 0 1.5px var(--text);
+}
+
+.mood-chip[data-mood="happy"] span { background: #FFEAB0; }
+.mood-chip[data-mood="calm"] span { background: #B5EDA4; }
+.mood-chip[data-mood="sad"] span { background: #CCE1F5; }
+.mood-chip[data-mood="angry"] span { background: #FFB7B7; }
+.mood-chip[data-mood="anxious"] span { background: #FFCEF8; }
+.mood-chip[data-mood="tired"] span { background: #BCBCBC; }
