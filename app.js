@@ -1972,6 +1972,7 @@ const BAR_NUMBER_MIN_PX = 14; // narrower bars hide their day number
 const NUMBER_LINE_MIN = 9.5 * 60; // 03:30: where day numbers and "+" sit without data
 const CARD_TOP_MIN = 17.25 * 60; // 11:15: the card's label line when over the chart
 const DEFAULT_NIGHT = { bed: '23:00', wake: '07:00' };
+const OPEN_SOLID = 0.55; // an open night's bar is solid down to here, then fades (styles.css)
 const NO_TIME = '… …'; // an empty time on the sleep card
 
 // The chips' rows, in order
@@ -2124,7 +2125,8 @@ function renderSleep({ scroll = false } = {}) {
       num.className = 'sleep-bar__day';
       num.textContent = String(i + 1);
       // An open bar fades out: its number stays in the solid top part
-      num.style.top = wake ? `${Math.min(Math.max(minToPx(line), top + 8), bottom - 8) - top}px` : '11px';
+      const numBottom = wake ? bottom : top + (bottom - top) * OPEN_SOLID;
+      num.style.top = `${Math.min(Math.max(minToPx(line), top + 8), numBottom - 8) - top}px`;
       if (bottom - top < 16) num.hidden = true;
       btn.append(num);
     } else {

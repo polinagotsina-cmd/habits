@@ -25,8 +25,8 @@ test('span is measured from 18:00', () => {
   assert.deepEqual(T.span('18:00', '02:00'), { start: 0, end: 480 });
   // Bedtime just before 18:00 starts above the top, not past the bottom
   assert.deepEqual(T.span('17:30', '01:00'), { start: -30, end: 420 });
-  // Open night: 3h from bedtime
-  assert.deepEqual(T.span('23:15', null), { start: 315, end: 495 });
+  // Open night: 6.5h from bedtime
+  assert.deepEqual(T.span('23:15', null), { start: 315, end: 705 });
 });
 
 test('nightDay: a night belongs to the day of waking up', () => {

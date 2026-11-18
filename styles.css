@@ -1243,15 +1243,16 @@ button {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--orange);
 }
 
-/* An open night (no wake-up yet) fades out downward */
+/* An open night (no wake-up yet): solid, then fading out in its lower part
+   (55%: OPEN_SOLID in app.js) */
 .sleep-bar.is-open {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-  background: linear-gradient(var(--yellow) 30%, transparent);
+  background: linear-gradient(var(--yellow) 55%, transparent);
 }
 
 .sleep-bar.is-open.is-today {
-  background: linear-gradient(var(--orange) 30%, transparent);
+  background: linear-gradient(var(--orange) 55%, transparent);
 }
 
 .sleep-bar__day {
@@ -1423,10 +1424,10 @@ button {
 
 .mood-grid {
   display: grid;
-  grid-template-columns: repeat(14, 1fr);
-  gap: 4px;
+  grid-template-columns: repeat(11, 1fr); /* 32px squares on a 390px phone, as in the mockup */
+  gap: 2px;
   margin-top: 10px;
-  padding: 0 calc(var(--safe-right) + 15px) 0 calc(var(--safe-left) + 15px);
+  padding: 0 calc(var(--safe-right) + 9px) 0 calc(var(--safe-left) + 9px);
 }
 
 .mood-day {

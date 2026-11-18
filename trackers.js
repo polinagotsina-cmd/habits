@@ -13,7 +13,7 @@ const Trackers = (() => {
   const DAY_MIN = 24 * 60;
   const CHART_START = 18 * 60; // 18:00 at the top of the chart
   const MAX_SLEEP = 20 * 60;
-  const OPEN_LENGTH = 3 * 60; // an open night's bar: 3h, fading out
+  const OPEN_LENGTH = 6.5 * 60; // an open night's bar: solid, then fading out
 
   // "2026-11-07" + 1 -> "2026-11-08"
   function addDays(key, n) {
