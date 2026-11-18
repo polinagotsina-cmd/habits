@@ -1243,6 +1243,17 @@ button {
   box-shadow: 0 0 0 2px var(--bg), 0 0 0 3.5px var(--orange);
 }
 
+/* An open night (no wake-up yet) fades out downward */
+.sleep-bar.is-open {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  background: linear-gradient(var(--yellow) 30%, transparent);
+}
+
+.sleep-bar.is-open.is-today {
+  background: linear-gradient(var(--orange) 30%, transparent);
+}
+
 .sleep-bar__day {
   position: absolute;
   left: 0;
@@ -1433,14 +1444,32 @@ button {
   box-shadow: inset 0 0 0 2px var(--orange);
 }
 
-.mood-day[data-mood="happy"] { background: #FFD768; }
-.mood-day[data-mood="okay"] { background: #FFEAB0; }
-.mood-day[data-mood="meh"] { background: #CACCFB; }
-.mood-day[data-mood="calm"] { background: #B7E6A8; }
-.mood-day[data-mood="sad"] { background: #BEDBF6; }
-.mood-day[data-mood="angry"] { background: #FFB7B7; }
-.mood-day[data-mood="anxious"] { background: #EECCF5; }
-.mood-day[data-mood="tired"] { background: #BCBCBC; }
+/* data-mood: the day's first mood; data-last: its last one, when there
+   are several (top-left / bottom-right triangles) */
+.mood-day[data-mood] {
+  background: var(--first);
+}
+
+.mood-day[data-last] {
+  background: linear-gradient(to bottom right, var(--first) calc(50% - 0.5px), var(--last) calc(50% + 0.5px));
+}
+
+.mood-day[data-mood="happy"] { --first: #FFD768; }
+.mood-day[data-mood="okay"] { --first: #FFEAB0; }
+.mood-day[data-mood="meh"] { --first: #CACCFB; }
+.mood-day[data-mood="calm"] { --first: #B7E6A8; }
+.mood-day[data-mood="sad"] { --first: #BEDBF6; }
+.mood-day[data-mood="angry"] { --first: #FFB7B7; }
+.mood-day[data-mood="anxious"] { --first: #EECCF5; }
+.mood-day[data-mood="tired"] { --first: #BCBCBC; }
+.mood-day[data-last="happy"] { --last: #FFD768; }
+.mood-day[data-last="okay"] { --last: #FFEAB0; }
+.mood-day[data-last="meh"] { --last: #CACCFB; }
+.mood-day[data-last="calm"] { --last: #B7E6A8; }
+.mood-day[data-last="sad"] { --last: #BEDBF6; }
+.mood-day[data-last="angry"] { --last: #FFB7B7; }
+.mood-day[data-last="anxious"] { --last: #EECCF5; }
+.mood-day[data-last="tired"] { --last: #BCBCBC; }
 
 .tracker--mood .tracker__label {
   margin-top: 39px;
@@ -1448,11 +1477,6 @@ button {
 
 .mood-card {
   min-height: 75px;
-}
-
-.mood-card.is-done {
-  width: min(205px, calc(100% - 32px));
-  height: 96px;
 }
 
 .mood-chips {
@@ -1480,10 +1504,6 @@ button {
   line-height: 19px;
 }
 
-.mood-chip.is-current span {
-  box-shadow: inset 0 0 0 1.5px var(--text);
-}
-
 .mood-chip[data-mood="happy"] span { background: #FFCC41; }
 .mood-chip[data-mood="okay"] span { background: #FFEAB0; }
 .mood-chip[data-mood="meh"] span { background: #CACCFB; }
@@ -1492,3 +1512,28 @@ button {
 .mood-chip[data-mood="angry"] span { background: #FFB7B7; }
 .mood-chip[data-mood="anxious"] span { background: #FFCEF8; }
 .mood-chip[data-mood="tired"] span { background: #BCBCBC; }
+
+/* Today's (or the picked day's) entries: "8:14 anxious · 21:30 calm" */
+.mood-entries {
+  margin: -6px 12px 0;
+  padding-bottom: 10px;
+  font-size: 11px;
+  font-weight: 300;
+  line-height: 14px;
+}
+
+/* 32px tap target around the small text */
+.mood-entry {
+  position: relative;
+  touch-action: manipulation;
+}
+
+.mood-entry::before {
+  content: "";
+  position: absolute;
+  inset: -9px -4px;
+}
+
+.mood-entry.is-armed {
+  color: var(--orange);
+}

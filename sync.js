@@ -38,7 +38,7 @@ const TABLES = {
   habit_notes: { key: ['date', 'habit_id'], order: 'date,habit_id' },
   todos: { key: ['id'], order: 'id' },
   sleep: { key: ['date'], order: 'date' },
-  mood: { key: ['date'], order: 'date' },
+  mood: { key: ['id'], order: 'date,id' },
 };
 
 class AuthError extends Error {}
@@ -158,8 +158,15 @@ const Rows = {
     weight: item.weight,
     deleted,
   }),
-  sleep: (date, night) => ({ date, bedtime: night.bed, wake_time: night.wake }),
-  mood: (date, mood) => ({ date, mood }),
+  // night = null: deleted (both times null). wake = null: an open night.
+  sleep: (date, night) => ({
+    date,
+    bedtime: night ? night.bed : null,
+    wake_time: night ? night.wake : null,
+  }),
+  mood: (date, entry, deleted = false) => ({
+    id: entry.id, date, time: entry.time, mood: entry.mood, deleted,
+  }),
 };
 
 const rowKey = (table, row) => `${table}:${TABLES[table].key.map((k) => row[k]).join('|')}`;
@@ -180,7 +187,9 @@ function allRows() {
     for (const item of items) out.todos.push(Rows.todo(list, item));
   }
   for (const [date, night] of Object.entries(d.sleep)) out.sleep.push(Rows.sleep(date, night));
-  for (const [date, mood] of Object.entries(d.mood)) out.mood.push(Rows.mood(date, mood));
+  for (const [date, list] of Object.entries(d.mood)) {
+    for (const entry of list) out.mood.push(Rows.mood(date, entry));
+  }
   // Checks/notes may name habits that aren't in the list (renamed or removed
   // ids): give them a habit row so nothing is rejected.
   const known = new Set(out.habits.map((h) => h.id));
@@ -230,10 +239,16 @@ function applyRow(table, row) {
     items.push(item);
     items.sort((a, b) => a.position - b.position);
   } else if (table === 'sleep') {
-    // Postgres sends times as "23:15:00"
-    d.sleep[row.date] = { bed: row.bedtime.slice(0, 5), wake: row.wake_time.slice(0, 5) };
+    // Postgres sends times as "23:15:00"; no bedtime = deleted
+    if (!row.bedtime) delete d.sleep[row.date];
+    else d.sleep[row.date] = { bed: row.bedtime.slice(0, 5), wake: row.wake_time && row.wake_time.slice(0, 5) };
   } else if (table === 'mood') {
-    d.mood[row.date] = row.mood;
+    // Rows from before 7_open_nights_and_moods.sql have no id: one per day
+    const id = row.id || row.date;
+    const list = (d.mood[row.date] || []).filter((e) => e.id !== id);
+    if (!row.deleted) list.push({ id, time: row.time ? row.time.slice(0, 5) : null, mood: row.mood });
+    if (list.length) d.mood[row.date] = Trackers.sortMoods(list);
+    else delete d.mood[row.date];
   }
 }
 

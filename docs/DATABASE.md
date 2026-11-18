@@ -1,6 +1,6 @@
 # Jade! database
 
-Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, `4_goals.sql`, `5_trackers.sql`, then `6_moods.sql`.
+Jade! keeps its data in Supabase (Postgres). The app works from a local copy and syncs it. Other clients, such as the Friday bot, read and write the same tables. The schema is in [`supabase/`](../supabase/): run `1_function.sql`, `2_tables.sql`, `3_security.sql`, `4_goals.sql`, `5_trackers.sql`, `6_moods.sql`, then `7_open_nights_and_moods.sql`.
 
 ## Connecting
 
@@ -16,7 +16,7 @@ Jade! keeps its data in Supabase (Postgres). The app works from a local copy and
 
 ## Rules for writers
 
-1. **Upsert, don't hard-delete.** Mark rows instead: `done = false`, `note = null` and `deleted = true`. Then other devices see the change when they sync.
+1. **Upsert, don't hard-delete.** Mark rows instead: `done = false`, `note = null`, `deleted = true`, and for a night both times `null`. Then other devices see the change when they sync.
 2. **Set `updated_at = now()` on every write.** It's how "latest change wins" works: the server ignores an update whose `updated_at` is older than the stored row. If you leave it out, a plain update is stamped with `now()` anyway.
 3. **Leave `synced_at` alone.** The server sets it. Clients pull rows with `synced_at` after their last pull.
 4. **Ids are text.** Use your own unique strings for new rows. A random UUID is fine.
@@ -101,35 +101,54 @@ To put it between two blocks, use the average of their positions. To check a tas
 | column | type | |
 |---|---|---|
 | `date` | date | the day of **waking up**, `YYYY-MM-DD` |
-| `bedtime` | time | local time, e.g. `23:15` (read back as `23:15:00`) |
-| `wake_time` | time | local time, e.g. `07:30` |
+| `bedtime` | time, null | local time, e.g. `23:15` (read back as `23:15:00`) |
+| `wake_time` | time, null | local time, e.g. `07:30`; `null` = not woken up yet (an **open** night) |
 
 Key: (`user_id`, `date`): one night per day; writing the same date again replaces it.
 
 - **Length** = `wake_time - bedtime`; if `wake_time` is earlier than `bedtime`, add 24h (the wake-up is on the next day). `23:15 → 07:30` is 8h 15m; `04:00 → 17:00` is 13h, all on `date`.
 - The app accepts more than 0 and at most 20 hours. Check the same when writing.
-- "Last night" in the app is the row for today's date; "avg" is the average length over the rows in the shown month.
+- **Open night** (`bedtime` set, `wake_time = null`): the bedtime was saved, the wake-up comes later. It still belongs to the day of waking up: a bedtime from 18:00 on starts the **next** day's night (23:15 on Nov 7 → `date = 2026-11-08`); an earlier one belongs to its own day (01:30 on Nov 8 → `2026-11-08`). To finish it, write the same `date` again with both times. An open night can stay open for days; the app keeps showing it until it's finished or deleted.
+- **Deleted night**: both `bedtime` and `wake_time` are `null`. Skip these rows. (`wake_time` without `bedtime` is rejected.)
+- "Last night" in the app is the row for today's date, if it has a `wake_time`; "avg" is the average length over the rows with a `wake_time` in the shown month. Open nights count in neither.
 
 ```python
+# Going to bed: an open night, on the day of waking up
 sb.table("sleep").upsert({
-    "date": "2026-11-07", "bedtime": "23:15", "wake_time": "07:30",
+    "date": "2026-11-08", "bedtime": "23:15", "wake_time": None,
+    "updated_at": datetime.now(timezone.utc).isoformat(),
+}, on_conflict="user_id,date").execute()
+# Woke up: finish it
+sb.table("sleep").upsert({
+    "date": "2026-11-08", "bedtime": "23:15", "wake_time": "07:30",
     "updated_at": datetime.now(timezone.utc).isoformat(),
 }, on_conflict="user_id,date").execute()
 ```
 
-### `mood`: the mood of a day
+### `mood`: moods logged during a day
 | column | type | |
 |---|---|---|
+| `id` | text | key; a new unique string per entry (a random UUID is fine) |
 | `date` | date | `YYYY-MM-DD` |
-| `mood` | text | one of `happy`, `okay`, `meh`, `calm`, `sad`, `angry`, `anxious`, `tired` (`okay` and `meh` need `6_moods.sql`) |
+| `time` | time, null | local time it was logged, e.g. `21:30` (read back as `21:30:00`); `null` = unknown (some moods from before `7_open_nights_and_moods.sql`) |
+| `mood` | text | one of `happy`, `okay`, `meh`, `calm`, `sad`, `angry`, `anxious`, `tired` |
+| `deleted` | bool | removed by the user |
 
-Key: (`user_id`, `date`): one mood per day; writing the same date again replaces it.
+Key: (`user_id`, `id`): a day can have any number of entries. Moods from before part 7 have `id` = their date (e.g. `2026-11-07`).
+
+- A day's entries in order: by `time`, entries without a time first, then by `id`. Skip `deleted` rows.
+- In the app's month grid, a day with one entry is filled with its color; with two or more it's split diagonally: the **first** mood of the day top left, the **last** one bottom right.
+- To add a mood, insert a new row. To remove one, set `deleted = true`.
 
 ```python
-sb.table("mood").upsert({
-    "date": "2026-11-07", "mood": "calm",
-    "updated_at": datetime.now(timezone.utc).isoformat(),
-}, on_conflict="user_id,date").execute()
+sb.table("mood").insert({
+    "id": str(uuid.uuid4()), "date": "2026-11-07", "time": "21:30", "mood": "calm",
+    "deleted": False, "updated_at": datetime.now(timezone.utc).isoformat(),
+}).execute()
+# Remove it
+sb.table("mood").update({
+    "deleted": True, "updated_at": datetime.now(timezone.utc).isoformat(),
+}).eq("id", ENTRY_ID).execute()
 ```
 
 ### Common columns

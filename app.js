@@ -8,8 +8,10 @@
        habits: [{ id, name, position, archived }],
        days: { "YYYY-MM-DD": { done: { id: true }, notes: { id: "text" } } },
        todos: { today: [item], longterm: [item], goals: [item] },
-       sleep: { "YYYY-MM-DD": { bed: "HH:MM", wake: "HH:MM" } }, // day of waking up
-       mood: { "YYYY-MM-DD": "happy" | "okay" | "meh" | "calm" | "sad" | "angry" | "anxious" | "tired" },
+       sleep: { "YYYY-MM-DD": { bed: "HH:MM", wake: "HH:MM" | null } }, // day of waking up; null = still open
+       mood: { "YYYY-MM-DD": [{ id, time: "HH:MM" | null, mood }] }, // sorted by time
+         // mood: "happy" | "okay" | "meh" | "calm" | "sad" | "angry" | "anxious" | "tired"
+
        ui: { openGoals: [id] },   // this device only, not synced
        sync: { pending: { key: { table, row } }, cursor, user }
      }
@@ -114,6 +116,21 @@ function todayKey() {
   return TODAY_OVERRIDE || toKey(new Date());
 }
 
+// For testing: ?time=HH:MM pretends that is the time of day.
+const TIME_OVERRIDE = (() => {
+  const v = new URLSearchParams(location.search).get('time');
+  return /^\d{2}:\d{2}$/.test(v || '') ? v : null;
+})();
+
+// "08:14"
+function nowTime() {
+  if (TIME_OVERRIDE) return TIME_OVERRIDE;
+  const d = new Date();
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
 /* ---------- Storage ---------- */
 
 const Store = {
@@ -145,6 +162,10 @@ const Store = {
     }
     if (!d.sleep || typeof d.sleep !== 'object') d.sleep = {};
     if (!d.mood || typeof d.mood !== 'object') d.mood = {};
+    // One mood per day -> a list of entries; the old one keeps the date as id
+    for (const [date, mood] of Object.entries(d.mood)) {
+      if (typeof mood === 'string') d.mood[date] = [{ id: date, time: null, mood }];
+    }
     if (!d.ui || typeof d.ui !== 'object') d.ui = {};
     if (!Array.isArray(d.ui.openGoals)) d.ui.openGoals = [];
     if (!Array.isArray(d.habits)) {
@@ -154,6 +175,13 @@ const Store = {
     if (!d.sync.pending || typeof d.sync.pending !== 'object') d.sync.pending = {};
     if (d.sync.cursor === undefined) d.sync.cursor = null;
     if (d.sync.user === undefined) d.sync.user = null;
+    // Unsent mood changes from the one-per-day version
+    for (const [key, p] of Object.entries(d.sync.pending)) {
+      if (p.table !== 'mood' || p.row.id) continue;
+      delete d.sync.pending[key];
+      const row = { ...p.row, id: p.row.date, time: null, deleted: false };
+      d.sync.pending[`mood:${row.id}`] = { table: 'mood', row };
+    }
     d.version = Math.max(d.version || 1, 3);
   },
 
@@ -193,15 +221,29 @@ const Store = {
     this.save();
   },
 
-  setSleep(key, bed, wake) {
-    this.data.sleep[key] = { bed, wake };
-    Sync.queue('sleep', Rows.sleep(key, this.data.sleep[key]));
+  // wake = null: an open night (bedtime only). bed = null: delete the night.
+  setSleep(key, bed, wake = null) {
+    if (bed) this.data.sleep[key] = { bed, wake };
+    else delete this.data.sleep[key];
+    Sync.queue('sleep', Rows.sleep(key, this.data.sleep[key] || null));
     this.save();
   },
 
-  setMood(key, mood) {
-    this.data.mood[key] = mood;
-    Sync.queue('mood', Rows.mood(key, mood));
+  addMood(key, mood, time) {
+    const entry = { id: newId(), time, mood };
+    this.data.mood[key] = Trackers.sortMoods([...(this.data.mood[key] || []), entry]);
+    Sync.queue('mood', Rows.mood(key, entry));
+    this.save();
+  },
+
+  deleteMood(key, id) {
+    const list = this.data.mood[key] || [];
+    const entry = list.find((e) => e.id === id);
+    if (!entry) return;
+    const rest = list.filter((e) => e !== entry);
+    if (rest.length) this.data.mood[key] = rest;
+    else delete this.data.mood[key];
+    Sync.queue('mood', Rows.mood(key, entry, true));
     this.save();
   },
 
@@ -252,7 +294,7 @@ const Store = {
     const parentId = fields.parentId || null;
     const siblings = this.todos(list).filter((t) => t.parentId === parentId);
     const item = {
-      id: Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      id: newId(),
       text,
       created: currentDay,
       doneOn: null,
@@ -1914,25 +1956,30 @@ const Drag = {
    Sleep: one bar per day (the day of waking up) on a time axis running from
    18:00 at the top to 17:00 at the bottom. The bars sit in a horizontal
    scroller; pinching changes the day width (--pitch) between "about a
-   week" and "the whole month". Mood: one square per day of the month.
+   week" and "the whole month". A bedtime can be saved alone: that open
+   night is a fading bar until its wake-up is added. Mood: one square per
+   day of the month, split diagonally (first / last mood) when a day has
+   several entries.
    Each tracker has a card for today; tapping a past day picks it (orange
    outline) and the card edits that day instead. */
 
 const HOUR_PX = 17; // one hour on the sleep chart
 const CHART_HOURS = 24;
-const DAYS_ZOOMED_IN = 7.5; // days in view at the default zoom
+const DAYS_ZOOMED_IN = 7.5; // days in view at the widest zoom
+const DAYS_DEFAULT = 15.7; // days in view at first, as in the mockup (22px a day)
 const BAR_RATIO = 0.78; // bar width / day width
 const BAR_NUMBER_MIN_PX = 14; // narrower bars hide their day number
 const NUMBER_LINE_MIN = 9.5 * 60; // 03:30: where day numbers and "+" sit without data
 const CARD_TOP_MIN = 17.25 * 60; // 11:15: the card's label line when over the chart
 const DEFAULT_NIGHT = { bed: '23:00', wake: '07:00' };
+const NO_TIME = '… …'; // an empty time on the sleep card
 
 // The chips' rows, in order
 const MOOD_ROWS = [['happy', 'okay', 'meh'], ['calm', 'sad', 'angry'], ['anxious', 'tired']];
 
 const tracker = {
-  sleep: { month: null, pick: null, draft: null, pitch: null },
-  mood: { month: null, pick: null },
+  sleep: { month: null, pick: null, draft: null, pitch: null, slot: null },
+  mood: { month: null, pick: null, armed: null },
 };
 
 const minToPx = (min) => (min / 60) * HOUR_PX;
@@ -1949,11 +1996,16 @@ function trackerEls(name) {
   };
 }
 
-// No future months; back to the earliest data, and at least one month back
+// Back to the earliest data, and at least one month back. No future months,
+// except one holding tonight's open night (Nov 30 evening -> Dec 1).
 function trackerMonths(data) {
-  const last = Stats.monthOf(currentDay);
+  let last = Stats.monthOf(currentDay);
   let first = Stats.addMonths(last, -1);
-  for (const key of Object.keys(data)) if (Stats.monthOf(key) < first) first = Stats.monthOf(key);
+  for (const key of Object.keys(data)) {
+    const month = Stats.monthOf(key);
+    if (month < first) first = month;
+    if (month > last) last = month;
+  }
   return { first, last };
 }
 
@@ -1986,8 +2038,38 @@ function sleepPitchRange() {
 
 function sleepPitch() {
   const { min, max } = sleepPitchRange();
-  const p = tracker.sleep.pitch;
-  return p === null ? max : Math.min(max, Math.max(min, p));
+  const p = tracker.sleep.pitch === null ? (els.sleepScroll.clientWidth || 330) / DAYS_DEFAULT : tracker.sleep.pitch;
+  return Math.min(max, Math.max(min, p));
+}
+
+/* An open night (bedtime, no wake-up) is "tonight" for 24h after its
+   bedtime: it's orange and today's card fills it in. After that it stays
+   open (a pale bar to pick and finish or delete) but stops holding the card. */
+function tonight() {
+  let best = null;
+  for (const [key, night] of Object.entries(Store.data.sleep)) {
+    if (night.wake || (best && key < best)) continue;
+    if (Trackers.openFor(key, night.bed, currentDay, nowTime()) <= Trackers.DAY_MIN) best = key;
+  }
+  return best;
+}
+
+// From 18:00 (the chart's top) today's card is for the coming night
+const isEvening = () => Trackers.toMinutes(nowTime()) >= Trackers.CHART_START;
+
+// What today's card is about: a picked day, tonight's open night, Done!
+// (today's night is in, before the evening), or a new night: before the
+// usual wake-up or in the evening it starts with only a bedtime.
+function sleepSlot() {
+  const state = tracker.sleep;
+  if (state.pick) return `pick:${state.pick}`;
+  const open = tonight();
+  if (open) return `open:${open}`;
+  const today = Store.data.sleep[currentDay];
+  if (today && today.wake && !isEvening()) return 'done';
+  const wake = (latestNight() || DEFAULT_NIGHT).wake;
+  const asleep = isEvening() || Trackers.toMinutes(nowTime()) < Trackers.toMinutes(wake);
+  return asleep ? 'new:night' : 'new:day';
 }
 
 // Day width only: everything inside the track is laid out from --pitch
@@ -2005,8 +2087,9 @@ function renderSleep({ scroll = false } = {}) {
 
   const sleep = Store.data.sleep;
   const today = sleep[currentDay];
+  const open = tonight();
   els.sleepLast.textContent =
-    `last night ${today ? Trackers.formatDuration(Trackers.duration(today.bed, today.wake)) : '–'}`;
+    `last night ${today && today.wake ? Trackers.formatDuration(Trackers.duration(today.bed, today.wake)) : '–'}`;
   const avg = Trackers.monthAverage(sleep, state.month);
   els.sleepAvg.textContent = `avg ${avg === null ? '–' : Trackers.formatDuration(avg)}`;
 
@@ -2014,15 +2097,16 @@ function renderSleep({ scroll = false } = {}) {
   const keys = monthKeys(state.month);
   const spans = keys.map((key) => sleep[key] && Trackers.span(sleep[key].bed, sleep[key].wake));
   const shown = spans.filter(Boolean);
+  const closed = spans.filter((s, i) => s && sleep[keys[i]].wake);
   // Day numbers and "+" share one line: the middle of the month's nights
-  const line = shown.length
-    ? shown.reduce((sum, s) => sum + (Math.max(0, s.start) + Math.min(Trackers.DAY_MIN, s.end)) / 2, 0) / shown.length
+  const line = closed.length
+    ? closed.reduce((sum, s) => sum + (Math.max(0, s.start) + Math.min(Trackers.DAY_MIN, s.end)) / 2, 0) / closed.length
     : NUMBER_LINE_MIN;
 
   const track = els.sleepTrack;
   track.textContent = '';
   keys.forEach((key, i) => {
-    if (key > currentDay) return; // future days stay empty
+    if (key > currentDay && !sleep[key]) return; // future days stay empty
     const s = spans[i];
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -2031,14 +2115,16 @@ function renderSleep({ scroll = false } = {}) {
     if (s) {
       const top = minToPx(Math.max(0, s.start));
       const bottom = minToPx(Math.min(Trackers.DAY_MIN, s.end));
-      btn.className = 'sleep-bar';
+      const { bed, wake } = sleep[key];
+      btn.className = wake ? 'sleep-bar' : 'sleep-bar is-open';
       btn.style.top = `${top}px`;
       btn.style.height = `${Math.max(bottom - top, 4)}px`;
-      btn.setAttribute('aria-label', `${shortDate(key)}: ${sleep[key].bed}–${sleep[key].wake}`);
+      btn.setAttribute('aria-label', `${shortDate(key)}: ${bed}–${wake || '…'}`);
       const num = document.createElement('span');
       num.className = 'sleep-bar__day';
       num.textContent = String(i + 1);
-      num.style.top = `${Math.min(Math.max(minToPx(line), top + 8), bottom - 8) - top}px`;
+      // An open bar fades out: its number stays in the solid top part
+      num.style.top = wake ? `${Math.min(Math.max(minToPx(line), top + 8), bottom - 8) - top}px` : '11px';
       if (bottom - top < 16) num.hidden = true;
       btn.append(num);
     } else {
@@ -2047,7 +2133,8 @@ function renderSleep({ scroll = false } = {}) {
       btn.textContent = '+';
       btn.setAttribute('aria-label', `Add ${shortDate(key)}`);
     }
-    btn.classList.toggle('is-today', key === currentDay);
+    // Tonight's open night is the orange one while it lasts
+    btn.classList.toggle('is-today', key === (open || currentDay));
     btn.classList.toggle('is-picked', key === state.pick);
     track.append(btn);
   });
@@ -2063,34 +2150,50 @@ function renderSleep({ scroll = false } = {}) {
   renderSleepCard();
 }
 
-// Today (or the month's last day) near the right edge of the view
+// Today or tonight (or the month's last day) near the right edge of the view
 function scrollSleepToDay() {
   const keys = monthKeys(tracker.sleep.month);
-  const last = keys.includes(currentDay) ? keys.indexOf(currentDay) : keys.length - 1;
+  const day = tonight() || currentDay;
+  const last = keys.includes(day) ? keys.indexOf(day) : keys.length - 1;
   const pitch = sleepPitch();
   const sc = els.sleepScroll;
   sc.scrollLeft = Math.max(0, (last + 1.5) * pitch - sc.clientWidth);
 }
 
+/* The draft's day: a picked day or tonight's open night. A new night has
+   no day until it's saved: with a wake-up it's today's night, with only a
+   bedtime it's the night that bedtime starts (Trackers.nightDay). */
 function renderSleepCard() {
   const state = tracker.sleep;
-  const done = !state.pick && Store.data.sleep[currentDay];
-  els.sleep.card.classList.toggle('is-done', !!done);
-  if (done) return;
-  const day = state.pick || currentDay;
-  if (!state.draft || state.draft.day !== day) {
-    const night = Store.data.sleep[day] || latestNight() || DEFAULT_NIGHT;
-    state.draft = { day, bed: night.bed, wake: night.wake };
+  const slot = sleepSlot();
+  state.slot = slot;
+  const done = slot === 'done';
+  els.sleep.card.classList.toggle('is-done', done);
+  if (done) {
+    state.draft = null;
+    return;
   }
-  for (const name of ['bed', 'wake']) {
-    els.sleepValues[name].textContent = Trackers.formatTime(state.draft[name]);
-    els.sleepInputs[name].value = state.draft[name];
+  if (!state.draft || state.draft.slot !== slot) {
+    const [kind, arg] = slot.split(':');
+    const day = kind === 'new' ? null : arg;
+    const night = day && Store.data.sleep[day];
+    const latest = latestNight() || DEFAULT_NIGHT;
+    if (night) state.draft = { slot, day, bed: night.bed, wake: night.wake };
+    else state.draft = { slot, day, bed: latest.bed, wake: arg === 'night' ? null : latest.wake };
   }
+  for (const name of ['bed', 'wake']) setSleepField(name, state.draft[name]);
   els.sleepError.textContent = '';
 }
 
+function setSleepField(name, time) {
+  els.sleepValues[name].textContent = time ? Trackers.formatTime(time) : NO_TIME;
+  els.sleepValues[name].classList.toggle('is-empty', !time);
+  els.sleepInputs[name].value = time || '';
+}
+
+// The latest finished night, for the card's starting times
 function latestNight() {
-  const keys = Object.keys(Store.data.sleep).sort();
+  const keys = Object.keys(Store.data.sleep).filter((k) => Store.data.sleep[k].wake).sort();
   return keys.length ? Store.data.sleep[keys[keys.length - 1]] : null;
 }
 
@@ -2104,13 +2207,18 @@ function pickSleepDay(key) {
 
 function saveSleep() {
   const state = tracker.sleep;
+  if (!state.draft) return;
   const { day, bed, wake } = state.draft;
-  const problem = Trackers.problem(bed, wake);
+  let problem = null;
+  if (!bed && !(day && !wake && Store.data.sleep[day])) problem = 'Add a bedtime';
+  else if (bed && wake) problem = Trackers.problem(bed, wake);
   if (problem) {
     els.sleepError.textContent = problem;
     return;
   }
-  Store.setSleep(day, bed, wake);
+  if (!bed) Store.setSleep(day, null); // both cleared: delete the night
+  else if (wake) Store.setSleep(day || currentDay, bed, wake);
+  else Store.setSleep(day || Trackers.nightDay(bed, currentDay, nowTime()), bed, null);
   state.pick = null;
   state.draft = null;
   renderSleep();
@@ -2206,10 +2314,11 @@ function initSleep() {
 
   for (const [name, input] of Object.entries(els.sleepInputs)) {
     const update = () => {
-      // Cleared in the picker: keep the old time. No draft: the card shows Done!
-      if (!input.value || !tracker.sleep.draft) return;
-      tracker.sleep.draft[name] = input.value.slice(0, 5);
-      els.sleepValues[name].textContent = Trackers.formatTime(tracker.sleep.draft[name]);
+      // No draft: the card shows Done!. Cleared in the picker: no time.
+      if (!tracker.sleep.draft) return;
+      const time = input.value ? input.value.slice(0, 5) : null;
+      tracker.sleep.draft[name] = time;
+      setSleepField(name, time);
       els.sleepError.textContent = '';
     };
     input.addEventListener('input', update);
@@ -2234,6 +2343,8 @@ function renderMood() {
   const t = els.mood;
   renderTrackerHeader(t, state, Store.data.mood);
 
+  // One mood fills the square; two or more split it diagonally: the first
+  // of the day top left, the last bottom right
   const grid = els.moodGrid;
   grid.textContent = '';
   for (const key of monthKeys(state.month)) {
@@ -2241,19 +2352,39 @@ function renderMood() {
     sq.type = 'button';
     sq.className = 'mood-day';
     sq.dataset.day = key;
-    const mood = Store.data.mood[key];
-    if (mood) sq.dataset.mood = mood;
+    const list = Store.data.mood[key] || [];
+    if (list.length) sq.dataset.mood = list[0].mood;
+    if (list.length > 1) sq.dataset.last = list[list.length - 1].mood;
     sq.disabled = key > currentDay;
     sq.classList.toggle('is-picked', key === state.pick);
-    sq.setAttribute('aria-label', `${shortDate(key)}${mood ? `: ${mood}` : ''}`);
+    sq.setAttribute('aria-label',
+      `${shortDate(key)}${list.length ? `: ${list.map((e) => e.mood).join(', ')}` : ''}`);
     grid.append(sq);
   }
+  renderMoodEntries();
+}
 
-  const day = state.pick || currentDay;
-  t.card.classList.toggle('is-done', !state.pick && !!Store.data.mood[currentDay]);
-  for (const chip of els.moodChips.querySelectorAll('.mood-chip')) {
-    chip.classList.toggle('is-current', Store.data.mood[day] === chip.dataset.mood);
-  }
+// "8:14 anxious · 21:30 calm" under the chips. A tap arms an entry
+// ("delete?"), a second tap deletes it.
+function renderMoodEntries() {
+  const state = tracker.mood;
+  const list = Store.data.mood[state.pick || currentDay] || [];
+  const box = els.moodEntries;
+  box.textContent = '';
+  list.forEach((entry, i) => {
+    if (i) box.append(' · ');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'mood-entry';
+    btn.dataset.id = entry.id;
+    const armed = entry.id === state.armed;
+    btn.classList.toggle('is-armed', armed);
+    const time = entry.time ? `${Trackers.formatTime(entry.time)} ` : '';
+    btn.textContent = armed ? `delete ${entry.mood}?` : `${time}${entry.mood}`;
+    btn.setAttribute('aria-label', armed ? `Tap again to delete ${time}${entry.mood}` : `${time}${entry.mood}, tap to delete`);
+    box.append(btn);
+  });
+  box.hidden = !list.length;
 }
 
 function initMood() {
@@ -2261,6 +2392,7 @@ function initMood() {
   const root = els.mood.root;
   els.moodGrid = root.querySelector('.mood-grid');
   els.moodChips = root.querySelector('.mood-chips');
+  els.moodEntries = root.querySelector('.mood-entries');
 
   for (const moods of MOOD_ROWS) {
     const row = document.createElement('div');
@@ -2280,25 +2412,52 @@ function initMood() {
     btn.addEventListener('click', () => {
       tracker.mood.month = Stats.addMonths(tracker.mood.month, Number(btn.dataset.step));
       tracker.mood.pick = null;
+      tracker.mood.armed = null;
       renderMood();
     });
   }
 
-  // A past day picks it for editing; today's square reopens the chips
+  // A past day picks it: the card shows and adds to that day. Tapping it
+  // again, or today, goes back to today.
   els.moodGrid.addEventListener('click', (e) => {
     const sq = e.target.closest('.mood-day');
     if (!sq || sq.disabled) return;
     const state = tracker.mood;
-    state.pick = state.pick === sq.dataset.day ? null : sq.dataset.day;
+    const day = sq.dataset.day;
+    state.pick = state.pick === day || day === currentDay ? null : day;
+    state.armed = null;
     renderMood();
   });
 
+  // Every tap on a chip adds an entry, timed now
   els.moodChips.addEventListener('click', (e) => {
     const chip = e.target.closest('.mood-chip');
     if (!chip) return;
-    Store.setMood(tracker.mood.pick || currentDay, chip.dataset.mood);
-    tracker.mood.pick = null;
+    tracker.mood.armed = null;
+    Store.addMood(tracker.mood.pick || currentDay, chip.dataset.mood, nowTime());
     renderMood();
+  });
+
+  els.moodEntries.addEventListener('click', (e) => {
+    const btn = e.target.closest('.mood-entry');
+    if (!btn) return;
+    const state = tracker.mood;
+    if (state.armed === btn.dataset.id) {
+      Store.deleteMood(state.pick || currentDay, btn.dataset.id);
+      state.armed = null;
+      renderMood();
+    } else {
+      state.armed = btn.dataset.id;
+      renderMoodEntries();
+    }
+  });
+
+  // A tap anywhere else lets go of an armed entry
+  document.addEventListener('click', (e) => {
+    if (tracker.mood.armed && !e.target.closest('.mood-entry')) {
+      tracker.mood.armed = null;
+      renderMoodEntries();
+    }
   });
 }
 
@@ -2405,6 +2564,7 @@ function renderAll() {
 
 function checkDay() {
   if (todayKey() !== currentDay) renderAll();
+  else if (sleepSlot() !== tracker.sleep.slot) renderSleep();
   scheduleMidnight();
 }
 
