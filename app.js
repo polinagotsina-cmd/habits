@@ -32,7 +32,7 @@ const DEFAULT_HABITS = [
   { id: 'language', name: 'Language' },
   { id: 'blog', name: 'Blog/Clients' },
   { id: 'design', name: 'Design/Code' },
-  { id: 'smartass', name: 'Smartass' },
+  { id: 'smartass', name: 'Smartart' },
 ];
 
 let HABITS = []; // active habits in display order, see refreshHabits()
@@ -218,6 +218,15 @@ const Store = {
     else delete day.done[id];
     this.prune(key);
     Sync.queue('habit_checks', Rows.check(key, id, done));
+    this.save();
+  },
+
+  // Renames in place: the id (and so every check, note and streak) stays.
+  renameHabit(id, name) {
+    const habit = this.data.habits.find((h) => h.id === id);
+    if (!habit || !name || habit.name === name) return;
+    habit.name = name;
+    Sync.queue('habits', Rows.habit(habit));
     this.save();
   },
 
@@ -686,15 +695,63 @@ function renderNote(li, habit) {
   noteEl.hidden = !note;
 }
 
-// Tap on the circle = complete. Long press anywhere on the card = edit note.
+// Tap on the circle = complete. Tap on the name = rename.
+// Long press anywhere on the card = edit note.
 function attachCardGestures(li, habit) {
   attachPressGestures(li, {
-    inputSelector: '.habit__input',
+    inputSelector: '.habit__input, .habit__rename',
     onLongPress: () => openNoteEditor(li, habit),
     onClick: (e) => {
       if (e.target.closest('.check')) toggleCard(li, habit);
+      else if (e.target.closest('.habit__name')) openNameEditor(li, habit);
     },
   });
+}
+
+// The name turns into a field in place; Enter or tapping away saves,
+// Escape or an empty field keeps the old name.
+function openNameEditor(li, habit) {
+  if (li.querySelector('.habit__rename')) return;
+  const nameEl = li.querySelector('.habit__name');
+
+  const input = document.createElement('input');
+  input.className = 'habit__rename';
+  input.type = 'text';
+  input.value = habit.name;
+  input.setAttribute('enterkeyhint', 'done');
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('aria-label', `Rename ${habit.name}`);
+
+  nameEl.hidden = true;
+  nameEl.after(input);
+  input.focus(); // inside the tap, so iOS shows the keyboard
+  input.select();
+
+  let closed = false;
+  const close = (save) => {
+    if (closed) return;
+    closed = true;
+    const name = input.value.trim();
+    input.remove();
+    nameEl.hidden = false;
+    if (!save || !name || name === habit.name) return;
+    Store.renameHabit(habit.id, name);
+    refreshHabits();
+    habit.name = name; // the card's own copy
+    nameEl.textContent = name;
+    li.querySelector('.check').setAttribute('aria-label', `Mark ${name} done`);
+    renderWeek();
+    renderStats();
+  };
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      close(true);
+    } else if (e.key === 'Escape') {
+      close(false);
+    }
+  });
+  input.addEventListener('blur', () => close(true));
 }
 
 // Shared by habit cards, to-do items and goals. A fired long press swallows
